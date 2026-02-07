@@ -103,6 +103,45 @@ const FRONT_MIRROR_PAIRS: Array<[number, number]> = [
   [132, 361],
 ];
 
+const FALLBACK_INDEX: Record<string, number | null> = {
+  left_eye_lateral_canthus: 33,
+  right_eye_lateral_canthus: 263,
+  left_eye_medial_canthus: 133,
+  right_eye_medial_canthus: 362,
+  left_eye_upper_eyelid: 159,
+  left_eye_lower_eyelid: 145,
+  right_eye_upper_eyelid: 386,
+  right_eye_lower_eyelid: 374,
+  mouth_left: 61,
+  mouth_right: 291,
+  cupids_bow: 13,
+  labrale_inferius: 14,
+  left_top_gonion: 172,
+  right_top_gonion: 397,
+  left_bottom_gonion: 150,
+  right_bottom_gonion: 379,
+  left_cheek: 234,
+  right_cheek: 454,
+  left_nose_bridge: 98,
+  right_nose_bridge: 327,
+  glabella: 168,
+  subnasale: 2,
+  menton: 152,
+  chin_left: 149,
+  chin_right: 378,
+  nasion: 6,
+  pronasale: 1,
+  side_glabella: 168,
+  side_subnasale: 2,
+  pogonion: 152,
+  side_nasion: 6,
+  rhinion: 197,
+  supratip: 195,
+  infratip: 5,
+  columella: 4,
+  side_pronasale: 1,
+};
+
 const reasonPenaltyMultiplier = (reasonCodes: ReasonCode[]) => {
   let factor = 1;
   if (reasonCodes.includes("bad_pose")) factor *= 0.84;
@@ -128,6 +167,7 @@ type MetricDefinition = {
   view: MetricView;
   baseWeight: number;
   requiredPoints: number[];
+  requiredLandmarkIds?: string[];
   band: ScoreBand;
   notes: [string, string, string];
   formula: (ctx: ScoreContext) => number | null;
@@ -141,6 +181,9 @@ type ScoreContext = {
   frontAligned: Landmark[];
   sideAligned: Landmark[];
   manualByIndex: Map<string, ManualLandmarkPoint>;
+  manualById: Map<string, ManualLandmarkPoint>;
+  frontManualAligned: Map<string, Landmark>;
+  sideManualAligned: Map<string, Landmark>;
   frontQuality: PhotoQuality;
   sideQuality: PhotoQuality;
   ipd: number;
@@ -206,16 +249,19 @@ const pointVisibilityFactor = (points: Landmark[], indices: number[]) => {
 const metricBaseConfidence = (
   view: MetricView,
   ctx: ScoreContext,
-  requiredPoints: number[]
+  requiredPoints: number[],
+  requiredLandmarkIds?: string[]
 ) => {
   const frontPoints = pointVisibilityFactor(ctx.frontAligned, requiredPoints);
   const sidePoints = pointVisibilityFactor(ctx.sideAligned, requiredPoints);
+  const manualFactor = meanManualConfidence(requiredLandmarkIds, ctx.manualById);
 
   if (view === "front") {
     return (
       clamp01(ctx.frontQuality.confidence) *
       reasonPenaltyMultiplier(ctx.frontQuality.reasonCodes) *
-      frontPoints
+      frontPoints *
+      manualFactor
     );
   }
 
@@ -224,7 +270,8 @@ const metricBaseConfidence = (
       clamp01(ctx.sideQuality.confidence) *
       clamp01(ctx.sideQuality.viewWeight) *
       reasonPenaltyMultiplier(ctx.sideQuality.reasonCodes) *
-      sidePoints
+      sidePoints *
+      manualFactor
     );
   }
 
@@ -237,7 +284,7 @@ const metricBaseConfidence = (
     clamp01(ctx.sideQuality.viewWeight) *
     reasonPenaltyMultiplier(ctx.sideQuality.reasonCodes) *
     sidePoints;
-  return clamp01(front * 0.65 + side * 0.35);
+  return clamp01((front * 0.65 + side * 0.35) * manualFactor);
 };
 
 const hasRequiredPoints = (points: Landmark[], indices: number[]) =>
@@ -263,6 +310,49 @@ const buildManualMap = (points: ManualLandmarkPoint[] = []) => {
   return map;
 };
 
+const buildManualIdMap = (points: ManualLandmarkPoint[] = []) => {
+  const map = new Map<string, ManualLandmarkPoint>();
+  for (const point of points) {
+    map.set(point.id, point);
+  }
+  return map;
+};
+
+const buildAlignedManualMap = (
+  points: ManualLandmarkPoint[],
+  view: "front" | "side",
+  center: Landmark,
+  rollDeg: number
+) => {
+  const angleRad = (-rollDeg * Math.PI) / 180;
+  const map = new Map<string, Landmark>();
+  for (const point of points) {
+    if (point.view !== view) continue;
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) continue;
+    if (!point.confirmed) continue;
+    const aligned = rotatePoint(
+      { x: point.x, y: point.y, z: 0, visibility: point.confidence },
+      center,
+      angleRad
+    );
+    map.set(point.id, aligned);
+  }
+  return map;
+};
+
+const meanManualConfidence = (
+  ids: string[] | undefined,
+  manualById: Map<string, ManualLandmarkPoint>
+) => {
+  if (!ids?.length) return 1;
+  const values = ids
+    .map((id) => manualById.get(id))
+    .filter((point): point is ManualLandmarkPoint => point != null)
+    .map((point) => clamp01(point.confidence));
+  if (!values.length) return 1;
+  return avg(values);
+};
+
 const validateManualForMetric = (
   metric: MetricDefinition,
   ctx: ScoreContext
@@ -270,6 +360,25 @@ const validateManualForMetric = (
   valid: boolean;
   reason: string | null;
 } => {
+  if (metric.requiredLandmarkIds?.length) {
+    const matched = metric.requiredLandmarkIds
+      .map((id) => ctx.manualById.get(id))
+      .filter((point): point is ManualLandmarkPoint => point != null);
+
+    if (!matched.length) {
+      return { valid: true, reason: null };
+    }
+
+    const invalid = matched.filter((point) => !point.confirmed);
+    if (invalid.length) {
+      return {
+        valid: false,
+        reason: `manual_unconfirmed:${invalid.map((point) => point.id).join(",")}`,
+      };
+    }
+    return { valid: true, reason: null };
+  }
+
   const views: Array<"front" | "side"> =
     metric.view === "either" ? ["front", "side"] : [metric.view];
 
@@ -281,8 +390,7 @@ const validateManualForMetric = (
       const point = ctx.manualByIndex.get(manualKey(view, index));
       if (!point) continue;
       hasManualCoverage = true;
-      const lowConfidence = point.confidence < 0.55;
-      if (!point.confirmed || lowConfidence) {
+      if (!point.confirmed) {
         invalidPoints.push(point.id);
       }
     }
@@ -319,6 +427,21 @@ const lineDeviation = (points: Landmark[], start: Landmark, end: Landmark, scale
 const angleDeg = (a: Landmark, b: Landmark) =>
   (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI;
 
+const pointFromManualOrFallback = (
+  ctx: ScoreContext,
+  id: string,
+  view: "front" | "side",
+  fallbackIndex: number | null
+) => {
+  const manual =
+    view === "front" ? ctx.frontManualAligned.get(id) : ctx.sideManualAligned.get(id);
+  if (manual) return manual;
+
+  if (fallbackIndex == null) return null;
+  const source = view === "front" ? ctx.frontAligned : ctx.sideAligned;
+  return getPoint(source, fallbackIndex);
+};
+
 const metricDefinitions: MetricDefinition[] = [
   {
     id: "harmony_symmetry",
@@ -327,6 +450,22 @@ const metricDefinitions: MetricDefinition[] = [
     view: "front",
     baseWeight: 1.4,
     requiredPoints: FRONT_MIRROR_PAIRS.flat(),
+    requiredLandmarkIds: [
+      "left_eye_lateral_canthus",
+      "right_eye_lateral_canthus",
+      "left_eye_medial_canthus",
+      "right_eye_medial_canthus",
+      "left_cheek",
+      "right_cheek",
+      "left_top_gonion",
+      "right_top_gonion",
+      "left_bottom_gonion",
+      "right_bottom_gonion",
+      "mouth_left",
+      "mouth_right",
+      "chin_left",
+      "chin_right",
+    ],
     band: { min: 0, optMin: 0, optMax: 0.04, max: 0.2 },
     notes: [
       "Left-right balance is strong.",
@@ -334,18 +473,31 @@ const metricDefinitions: MetricDefinition[] = [
       "Symmetry drift detected.",
     ],
     formula: (ctx) => {
-      const leftEye = getPoint(ctx.frontAligned, 133);
-      const rightEye = getPoint(ctx.frontAligned, 362);
+      const p = (id: string) =>
+        pointFromManualOrFallback(ctx, id, "front", FALLBACK_INDEX[id] ?? null);
+      const leftEye = p("left_eye_medial_canthus");
+      const rightEye = p("right_eye_medial_canthus");
       if (!leftEye || !rightEye) return null;
       const midX = (leftEye.x + rightEye.x) / 2;
-      const errors = FRONT_MIRROR_PAIRS.map(([leftIndex, rightIndex]) => {
-        const left = getPoint(ctx.frontAligned, leftIndex);
-        const right = getPoint(ctx.frontAligned, rightIndex);
-        if (!left || !right) return null;
-        const dx = Math.abs(((left.x + right.x) / 2 - midX) * 2);
-        const dy = Math.abs(left.y - right.y);
-        return (dx + dy) / Math.max(ctx.ipd, 1e-6);
-      }).filter((value): value is number => value != null);
+      const pairs: Array<[string, string]> = [
+        ["left_eye_lateral_canthus", "right_eye_lateral_canthus"],
+        ["left_eye_medial_canthus", "right_eye_medial_canthus"],
+        ["mouth_left", "mouth_right"],
+        ["left_top_gonion", "right_top_gonion"],
+        ["left_bottom_gonion", "right_bottom_gonion"],
+        ["left_cheek", "right_cheek"],
+        ["chin_left", "chin_right"],
+      ];
+      const errors = pairs
+        .map(([leftId, rightId]) => {
+          const left = p(leftId);
+          const right = p(rightId);
+          if (!left || !right) return null;
+          const dx = Math.abs(((left.x + right.x) / 2 - midX) * 2);
+          const dy = Math.abs(left.y - right.y);
+          return (dx + dy) / Math.max(ctx.ipd, 1e-6);
+        })
+        .filter((value): value is number => value != null);
       return errors.length ? avg(errors) : null;
     },
   },
@@ -356,6 +508,7 @@ const metricDefinitions: MetricDefinition[] = [
     view: "front",
     baseWeight: 1.1,
     requiredPoints: [168, 2, 152],
+    requiredLandmarkIds: ["glabella", "subnasale", "menton"],
     band: { min: 0.55, optMin: 0.8, optMax: 1.15, max: 1.7 },
     notes: [
       "Vertical proportions are balanced.",
@@ -363,9 +516,11 @@ const metricDefinitions: MetricDefinition[] = [
       "Vertical proportion drift detected.",
     ],
     formula: (ctx) => {
-      const brow = getPoint(ctx.frontAligned, 168);
-      const noseBase = getPoint(ctx.frontAligned, 2);
-      const chin = getPoint(ctx.frontAligned, 152);
+      const p = (id: string) =>
+        pointFromManualOrFallback(ctx, id, "front", FALLBACK_INDEX[id] ?? null);
+      const brow = p("glabella");
+      const noseBase = p("subnasale");
+      const chin = p("menton");
       if (!brow || !noseBase || !chin) return null;
       const upper = dist(brow, noseBase);
       const lower = dist(noseBase, chin);
@@ -380,6 +535,7 @@ const metricDefinitions: MetricDefinition[] = [
     view: "front",
     baseWeight: 1,
     requiredPoints: [172, 397, 234, 454],
+    requiredLandmarkIds: ["left_top_gonion", "right_top_gonion", "left_cheek", "right_cheek"],
     band: { min: 0.6, optMin: 0.78, optMax: 0.96, max: 1.18 },
     notes: [
       "Jaw-cheek proportion is balanced.",
@@ -387,10 +543,12 @@ const metricDefinitions: MetricDefinition[] = [
       "Jaw-cheek proportion appears imbalanced.",
     ],
     formula: (ctx) => {
-      const jawLeft = getPoint(ctx.frontAligned, 172);
-      const jawRight = getPoint(ctx.frontAligned, 397);
-      const cheekLeft = getPoint(ctx.frontAligned, 234);
-      const cheekRight = getPoint(ctx.frontAligned, 454);
+      const p = (id: string) =>
+        pointFromManualOrFallback(ctx, id, "front", FALLBACK_INDEX[id] ?? null);
+      const jawLeft = p("left_top_gonion");
+      const jawRight = p("right_top_gonion");
+      const cheekLeft = p("left_cheek");
+      const cheekRight = p("right_cheek");
       if (!jawLeft || !jawRight || !cheekLeft || !cheekRight) return null;
       const jaw = dist(jawLeft, jawRight);
       const cheek = dist(cheekLeft, cheekRight);
@@ -404,7 +562,13 @@ const metricDefinitions: MetricDefinition[] = [
     pillar: "harmony",
     view: "front",
     baseWeight: 0.9,
-    requiredPoints: [133, 362, 61, 291],
+    requiredPoints: [33, 263, 61, 291],
+    requiredLandmarkIds: [
+      "left_eye_lateral_canthus",
+      "right_eye_lateral_canthus",
+      "mouth_left",
+      "mouth_right",
+    ],
     band: { min: 0.55, optMin: 0.75, optMax: 1.1, max: 1.5 },
     notes: [
       "Eye-mouth ratio is balanced.",
@@ -412,10 +576,12 @@ const metricDefinitions: MetricDefinition[] = [
       "Eye-mouth ratio is outside stable range.",
     ],
     formula: (ctx) => {
-      const eyeLeft = getPoint(ctx.frontAligned, 133);
-      const eyeRight = getPoint(ctx.frontAligned, 362);
-      const mouthLeft = getPoint(ctx.frontAligned, 61);
-      const mouthRight = getPoint(ctx.frontAligned, 291);
+      const p = (id: string) =>
+        pointFromManualOrFallback(ctx, id, "front", FALLBACK_INDEX[id] ?? null);
+      const eyeLeft = p("left_eye_lateral_canthus");
+      const eyeRight = p("right_eye_lateral_canthus");
+      const mouthLeft = p("mouth_left");
+      const mouthRight = p("mouth_right");
       if (!eyeLeft || !eyeRight || !mouthLeft || !mouthRight) return null;
       const eyeWidth = dist(eyeLeft, eyeRight);
       const mouthWidth = dist(mouthLeft, mouthRight);
@@ -430,6 +596,7 @@ const metricDefinitions: MetricDefinition[] = [
     view: "side",
     baseWeight: 0.8,
     requiredPoints: [168, 2, 152],
+    requiredLandmarkIds: ["side_glabella", "side_subnasale", "pogonion"],
     band: { min: 0.55, optMin: 0.8, optMax: 1.2, max: 1.8 },
     notes: [
       "Profile thirds are balanced.",
@@ -437,9 +604,11 @@ const metricDefinitions: MetricDefinition[] = [
       "Profile thirds are outside stable range.",
     ],
     formula: (ctx) => {
-      const brow = getPoint(ctx.sideAligned, 168);
-      const noseBase = getPoint(ctx.sideAligned, 2);
-      const chin = getPoint(ctx.sideAligned, 152);
+      const p = (id: string) =>
+        pointFromManualOrFallback(ctx, id, "side", FALLBACK_INDEX[id] ?? null);
+      const brow = p("side_glabella");
+      const noseBase = p("side_subnasale");
+      const chin = p("pogonion");
       if (!brow || !noseBase || !chin) return null;
       const upper = dist(brow, noseBase);
       const lower = dist(noseBase, chin);
@@ -454,6 +623,7 @@ const metricDefinitions: MetricDefinition[] = [
     view: "front",
     baseWeight: 1.2,
     requiredPoints: [172, 397, 2, 152],
+    requiredLandmarkIds: ["left_top_gonion", "right_top_gonion", "subnasale", "menton"],
     band: { min: 0.6, optMin: 0.95, optMax: 1.4, max: 1.95 },
     notes: [
       "Lower-face structure appears angular.",
@@ -461,10 +631,12 @@ const metricDefinitions: MetricDefinition[] = [
       "Lower-face structure appears soft.",
     ],
     formula: (ctx) => {
-      const jawLeft = getPoint(ctx.frontAligned, 172);
-      const jawRight = getPoint(ctx.frontAligned, 397);
-      const noseBase = getPoint(ctx.frontAligned, 2);
-      const chin = getPoint(ctx.frontAligned, 152);
+      const p = (id: string) =>
+        pointFromManualOrFallback(ctx, id, "front", FALLBACK_INDEX[id] ?? null);
+      const jawLeft = p("left_top_gonion");
+      const jawRight = p("right_top_gonion");
+      const noseBase = p("subnasale");
+      const chin = p("menton");
       if (!jawLeft || !jawRight || !noseBase || !chin) return null;
       const jawWidth = dist(jawLeft, jawRight);
       const lowerHeight = dist(noseBase, chin);
@@ -479,6 +651,7 @@ const metricDefinitions: MetricDefinition[] = [
     view: "front",
     baseWeight: 1,
     requiredPoints: [149, 378, 172, 397],
+    requiredLandmarkIds: ["chin_left", "chin_right", "left_top_gonion", "right_top_gonion"],
     band: { min: 0.25, optMin: 0.4, optMax: 0.65, max: 0.9 },
     notes: [
       "Chin taper is well defined.",
@@ -486,10 +659,12 @@ const metricDefinitions: MetricDefinition[] = [
       "Chin taper is weak or uncertain.",
     ],
     formula: (ctx) => {
-      const chinLeft = getPoint(ctx.frontAligned, 149);
-      const chinRight = getPoint(ctx.frontAligned, 378);
-      const jawLeft = getPoint(ctx.frontAligned, 172);
-      const jawRight = getPoint(ctx.frontAligned, 397);
+      const p = (id: string) =>
+        pointFromManualOrFallback(ctx, id, "front", FALLBACK_INDEX[id] ?? null);
+      const chinLeft = p("chin_left");
+      const chinRight = p("chin_right");
+      const jawLeft = p("left_top_gonion");
+      const jawRight = p("right_top_gonion");
       if (!chinLeft || !chinRight || !jawLeft || !jawRight) return null;
       const chinWidth = dist(chinLeft, chinRight);
       const jawWidth = dist(jawLeft, jawRight);
@@ -504,6 +679,7 @@ const metricDefinitions: MetricDefinition[] = [
     view: "side",
     baseWeight: 1.1,
     requiredPoints: [152, 2],
+    requiredLandmarkIds: ["pogonion", "side_subnasale"],
     band: { min: 0.02, optMin: 0.1, optMax: 0.3, max: 0.55 },
     notes: [
       "Profile chin projection is strong.",
@@ -511,8 +687,10 @@ const metricDefinitions: MetricDefinition[] = [
       "Profile chin projection is limited or uncertain.",
     ],
     formula: (ctx) => {
-      const chin = getPoint(ctx.sideAligned, 152);
-      const noseBase = getPoint(ctx.sideAligned, 2);
+      const p = (id: string) =>
+        pointFromManualOrFallback(ctx, id, "side", FALLBACK_INDEX[id] ?? null);
+      const chin = p("pogonion");
+      const noseBase = p("side_subnasale");
       if (!chin || !noseBase) return null;
       const projection = Math.abs(
         profileDirectionAwareDelta(chin, noseBase, ctx.sideQuality.poseYaw)
@@ -527,6 +705,7 @@ const metricDefinitions: MetricDefinition[] = [
     view: "front",
     baseWeight: 1,
     requiredPoints: [234, 454, 168, 2],
+    requiredLandmarkIds: ["left_cheek", "right_cheek", "glabella", "subnasale"],
     band: { min: 1.2, optMin: 1.55, optMax: 2.15, max: 2.8 },
     notes: [
       "Upper-face width-height ratio is strong.",
@@ -534,10 +713,12 @@ const metricDefinitions: MetricDefinition[] = [
       "Upper-face width-height ratio is low or uncertain.",
     ],
     formula: (ctx) => {
-      const cheekLeft = getPoint(ctx.frontAligned, 234);
-      const cheekRight = getPoint(ctx.frontAligned, 454);
-      const brow = getPoint(ctx.frontAligned, 168);
-      const noseBase = getPoint(ctx.frontAligned, 2);
+      const p = (id: string) =>
+        pointFromManualOrFallback(ctx, id, "front", FALLBACK_INDEX[id] ?? null);
+      const cheekLeft = p("left_cheek");
+      const cheekRight = p("right_cheek");
+      const brow = p("glabella");
+      const noseBase = p("subnasale");
       if (!cheekLeft || !cheekRight || !brow || !noseBase) return null;
       const width = dist(cheekLeft, cheekRight);
       const upperHeight = dist(brow, noseBase);
@@ -552,6 +733,7 @@ const metricDefinitions: MetricDefinition[] = [
     view: "front",
     baseWeight: 0.95,
     requiredPoints: [2, 152, 234, 454],
+    requiredLandmarkIds: ["subnasale", "menton", "left_cheek", "right_cheek"],
     band: { min: 0.35, optMin: 0.52, optMax: 0.82, max: 1.2 },
     notes: [
       "Lower-face ratio is robust.",
@@ -559,10 +741,12 @@ const metricDefinitions: MetricDefinition[] = [
       "Lower-face ratio is low-confidence or soft.",
     ],
     formula: (ctx) => {
-      const noseBase = getPoint(ctx.frontAligned, 2);
-      const chin = getPoint(ctx.frontAligned, 152);
-      const cheekLeft = getPoint(ctx.frontAligned, 234);
-      const cheekRight = getPoint(ctx.frontAligned, 454);
+      const p = (id: string) =>
+        pointFromManualOrFallback(ctx, id, "front", FALLBACK_INDEX[id] ?? null);
+      const noseBase = p("subnasale");
+      const chin = p("menton");
+      const cheekLeft = p("left_cheek");
+      const cheekRight = p("right_cheek");
       if (!noseBase || !chin || !cheekLeft || !cheekRight) return null;
       const lowerHeight = dist(noseBase, chin);
       const width = dist(cheekLeft, cheekRight);
@@ -577,6 +761,7 @@ const metricDefinitions: MetricDefinition[] = [
     view: "front",
     baseWeight: 1.05,
     requiredPoints: [172, 397, 234, 454],
+    requiredLandmarkIds: ["left_top_gonion", "right_top_gonion", "left_cheek", "right_cheek"],
     band: { min: 0.58, optMin: 0.8, optMax: 1.02, max: 1.22 },
     notes: [
       "Jaw-cheek relationship appears strong.",
@@ -584,10 +769,12 @@ const metricDefinitions: MetricDefinition[] = [
       "Jaw-cheek relationship appears weak or uncertain.",
     ],
     formula: (ctx) => {
-      const jawLeft = getPoint(ctx.frontAligned, 172);
-      const jawRight = getPoint(ctx.frontAligned, 397);
-      const cheekLeft = getPoint(ctx.frontAligned, 234);
-      const cheekRight = getPoint(ctx.frontAligned, 454);
+      const p = (id: string) =>
+        pointFromManualOrFallback(ctx, id, "front", FALLBACK_INDEX[id] ?? null);
+      const jawLeft = p("left_top_gonion");
+      const jawRight = p("right_top_gonion");
+      const cheekLeft = p("left_cheek");
+      const cheekRight = p("right_cheek");
       if (!jawLeft || !jawRight || !cheekLeft || !cheekRight) return null;
       const jaw = dist(jawLeft, jawRight);
       const cheek = dist(cheekLeft, cheekRight);
@@ -602,6 +789,7 @@ const metricDefinitions: MetricDefinition[] = [
     view: "front",
     baseWeight: 0.85,
     requiredPoints: [33, 263],
+    requiredLandmarkIds: ["left_eye_lateral_canthus", "right_eye_lateral_canthus"],
     band: { min: 0, optMin: 3, optMax: 14, max: 26 },
     notes: [
       "Eye tilt appears balanced.",
@@ -609,8 +797,10 @@ const metricDefinitions: MetricDefinition[] = [
       "Eye tilt is outside stable range.",
     ],
     formula: (ctx) => {
-      const outerLeft = getPoint(ctx.frontAligned, 33);
-      const outerRight = getPoint(ctx.frontAligned, 263);
+      const p = (id: string) =>
+        pointFromManualOrFallback(ctx, id, "front", FALLBACK_INDEX[id] ?? null);
+      const outerLeft = p("left_eye_lateral_canthus");
+      const outerRight = p("right_eye_lateral_canthus");
       if (!outerLeft || !outerRight) return null;
       return Math.abs(angleDeg(outerLeft, outerRight));
     },
@@ -622,6 +812,16 @@ const metricDefinitions: MetricDefinition[] = [
     view: "front",
     baseWeight: 1,
     requiredPoints: [33, 133, 159, 145, 263, 362, 386, 374],
+    requiredLandmarkIds: [
+      "left_eye_lateral_canthus",
+      "left_eye_medial_canthus",
+      "left_eye_upper_eyelid",
+      "left_eye_lower_eyelid",
+      "right_eye_lateral_canthus",
+      "right_eye_medial_canthus",
+      "right_eye_upper_eyelid",
+      "right_eye_lower_eyelid",
+    ],
     band: { min: 0.06, optMin: 0.14, optMax: 0.32, max: 0.5 },
     notes: [
       "Eye aperture appears healthy.",
@@ -629,27 +829,19 @@ const metricDefinitions: MetricDefinition[] = [
       "Eye aperture appears limited or uncertain.",
     ],
     formula: (ctx) => {
-      const lOuter = getPoint(ctx.frontAligned, 33);
-      const lInner = getPoint(ctx.frontAligned, 133);
-      const lTop = getPoint(ctx.frontAligned, 159);
-      const lBottom = getPoint(ctx.frontAligned, 145);
-      const rOuter = getPoint(ctx.frontAligned, 263);
-      const rInner = getPoint(ctx.frontAligned, 362);
-      const rTop = getPoint(ctx.frontAligned, 386);
-      const rBottom = getPoint(ctx.frontAligned, 374);
-      if (
-        !lOuter ||
-        !lInner ||
-        !lTop ||
-        !lBottom ||
-        !rOuter ||
-        !rInner ||
-        !rTop ||
-        !rBottom
-      ) {
+      const p = (id: string) =>
+        pointFromManualOrFallback(ctx, id, "front", FALLBACK_INDEX[id] ?? null);
+      const lOuter = p("left_eye_lateral_canthus");
+      const lInner = p("left_eye_medial_canthus");
+      const lTop = p("left_eye_upper_eyelid");
+      const lBottom = p("left_eye_lower_eyelid");
+      const rOuter = p("right_eye_lateral_canthus");
+      const rInner = p("right_eye_medial_canthus");
+      const rTop = p("right_eye_upper_eyelid");
+      const rBottom = p("right_eye_lower_eyelid");
+      if (!lOuter || !lInner || !lTop || !lBottom || !rOuter || !rInner || !rTop || !rBottom) {
         return null;
       }
-
       const leftWidth = dist(lOuter, lInner);
       const rightWidth = dist(rOuter, rInner);
       if (leftWidth <= 1e-6 || rightWidth <= 1e-6) return null;
@@ -665,6 +857,7 @@ const metricDefinitions: MetricDefinition[] = [
     view: "front",
     baseWeight: 1,
     requiredPoints: [6, 1, 98, 327],
+    requiredLandmarkIds: ["nasion", "pronasale", "left_nose_bridge", "right_nose_bridge"],
     band: { min: 0.8, optMin: 1.2, optMax: 2.0, max: 2.9 },
     notes: [
       "Nasal proportion appears balanced.",
@@ -672,10 +865,12 @@ const metricDefinitions: MetricDefinition[] = [
       "Nasal proportion appears outside stable range.",
     ],
     formula: (ctx) => {
-      const bridge = getPoint(ctx.frontAligned, 6);
-      const tip = getPoint(ctx.frontAligned, 1);
-      const wingLeft = getPoint(ctx.frontAligned, 98);
-      const wingRight = getPoint(ctx.frontAligned, 327);
+      const p = (id: string) =>
+        pointFromManualOrFallback(ctx, id, "front", FALLBACK_INDEX[id] ?? null);
+      const bridge = p("nasion");
+      const tip = p("pronasale");
+      const wingLeft = p("left_nose_bridge");
+      const wingRight = p("right_nose_bridge");
       if (!bridge || !tip || !wingLeft || !wingRight) return null;
       const length = dist(bridge, tip);
       const width = dist(wingLeft, wingRight);
@@ -690,6 +885,7 @@ const metricDefinitions: MetricDefinition[] = [
     view: "front",
     baseWeight: 0.9,
     requiredPoints: [13, 14, 61, 291],
+    requiredLandmarkIds: ["cupids_bow", "labrale_inferius", "mouth_left", "mouth_right"],
     band: { min: 0.04, optMin: 0.1, optMax: 0.24, max: 0.42 },
     notes: [
       "Lip proportion appears balanced.",
@@ -697,10 +893,12 @@ const metricDefinitions: MetricDefinition[] = [
       "Lip proportion appears low-confidence or off-range.",
     ],
     formula: (ctx) => {
-      const upper = getPoint(ctx.frontAligned, 13);
-      const lower = getPoint(ctx.frontAligned, 14);
-      const left = getPoint(ctx.frontAligned, 61);
-      const right = getPoint(ctx.frontAligned, 291);
+      const p = (id: string) =>
+        pointFromManualOrFallback(ctx, id, "front", FALLBACK_INDEX[id] ?? null);
+      const upper = p("cupids_bow");
+      const lower = p("labrale_inferius");
+      const left = p("mouth_left");
+      const right = p("mouth_right");
       if (!upper || !lower || !left || !right) return null;
       const fullness = dist(upper, lower);
       const width = dist(left, right);
@@ -715,6 +913,14 @@ const metricDefinitions: MetricDefinition[] = [
     view: "side",
     baseWeight: 0.85,
     requiredPoints: [6, 197, 195, 5, 4, 1],
+    requiredLandmarkIds: [
+      "side_nasion",
+      "rhinion",
+      "supratip",
+      "infratip",
+      "columella",
+      "side_pronasale",
+    ],
     band: { min: 0, optMin: 0, optMax: 0.028, max: 0.12 },
     notes: [
       "Nasal dorsum appears straight.",
@@ -722,14 +928,20 @@ const metricDefinitions: MetricDefinition[] = [
       "Nasal dorsum appears irregular or low-confidence.",
     ],
     formula: (ctx) => {
-      const indices = [6, 197, 195, 5, 4, 1];
-      const points = indices
-        .map((index) => getPoint(ctx.sideAligned, index))
-        .filter((point): point is Landmark => point != null);
-      if (points.length < 4) return null;
-      const start = points[0];
-      const end = points[points.length - 1];
-      return lineDeviation(points, start, end, ctx.sideScale);
+      const p = (id: string) =>
+        pointFromManualOrFallback(ctx, id, "side", FALLBACK_INDEX[id] ?? null);
+      const sequence = [
+        p("side_nasion"),
+        p("rhinion"),
+        p("supratip"),
+        p("infratip"),
+        p("columella"),
+        p("side_pronasale"),
+      ].filter((point): point is Landmark => point != null);
+      if (sequence.length < 4) return null;
+      const start = sequence[0];
+      const end = sequence[sequence.length - 1];
+      return lineDeviation(sequence, start, end, ctx.sideScale);
     },
   },
 ];
@@ -750,6 +962,8 @@ const buildContext = (
 ): ScoreContext => {
   const frontQuality = ensureQuality(frontQualityInput, "front");
   const sideQuality = ensureQuality(sideQualityInput, "side");
+  const manualByIndex = buildManualMap(manualPoints);
+  const manualById = buildManualIdMap(manualPoints);
 
   const leftEye = getPoint(frontLandmarks, 133) ?? getPoint(frontLandmarks, 33);
   const rightEye = getPoint(frontLandmarks, 362) ?? getPoint(frontLandmarks, 263);
@@ -788,12 +1002,68 @@ const buildContext = (
       ? Math.max(dist(sideScaleRefA, sideScaleRefB), 1e-6)
       : Math.max(ipd * 1.2, 1e-6);
 
+  const manualFrontLeftEye =
+    manualById.get("left_eye_medial_canthus") ??
+    manualById.get("left_eye_lateral_canthus");
+  const manualFrontRightEye =
+    manualById.get("right_eye_medial_canthus") ??
+    manualById.get("right_eye_lateral_canthus");
+  const manualFrontCenter =
+    manualFrontLeftEye &&
+    manualFrontRightEye &&
+    manualFrontLeftEye.confirmed &&
+    manualFrontRightEye.confirmed
+      ? midpoint(
+          {
+            x: manualFrontLeftEye.x,
+            y: manualFrontLeftEye.y,
+          },
+          {
+            x: manualFrontRightEye.x,
+            y: manualFrontRightEye.y,
+          }
+        )
+      : faceCenter;
+
+  const manualSideA =
+    manualById.get("side_nasion")?.confirmed && manualById.get("side_nasion")
+      ? {
+          x: manualById.get("side_nasion")?.x ?? sideCenter.x,
+          y: manualById.get("side_nasion")?.y ?? sideCenter.y,
+        }
+      : null;
+  const manualSideB =
+    manualById.get("pogonion")?.confirmed && manualById.get("pogonion")
+      ? {
+          x: manualById.get("pogonion")?.x ?? sideCenter.x,
+          y: manualById.get("pogonion")?.y ?? sideCenter.y,
+        }
+      : null;
+  const manualSideCenter =
+    manualSideA && manualSideB ? midpoint(manualSideA, manualSideB) : sideCenter;
+
+  const frontManualAligned = buildAlignedManualMap(
+    manualPoints,
+    "front",
+    manualFrontCenter,
+    frontQuality.poseRoll
+  );
+  const sideManualAligned = buildAlignedManualMap(
+    manualPoints,
+    "side",
+    manualSideCenter,
+    sideQuality.poseRoll
+  );
+
   return {
     front: frontLandmarks,
     side: sideLandmarks,
     frontAligned,
     sideAligned,
-    manualByIndex: buildManualMap(manualPoints),
+    manualByIndex,
+    manualById,
+    frontManualAligned,
+    sideManualAligned,
     frontQuality,
     sideQuality,
     ipd,
@@ -824,14 +1094,36 @@ const evaluateMetric = (metric: MetricDefinition, ctx: ScoreContext): MetricResu
     };
   }
 
+  const hasRequiredByIds = () => {
+    if (!metric.requiredLandmarkIds?.length) return null;
+    if (metric.view === "front") {
+      return metric.requiredLandmarkIds.every(
+        (id) =>
+          pointFromManualOrFallback(ctx, id, "front", FALLBACK_INDEX[id] ?? null) != null
+      );
+    }
+    if (metric.view === "side") {
+      return metric.requiredLandmarkIds.every(
+        (id) =>
+          pointFromManualOrFallback(ctx, id, "side", FALLBACK_INDEX[id] ?? null) != null
+      );
+    }
+    return metric.requiredLandmarkIds.every(
+      (id) =>
+        pointFromManualOrFallback(ctx, id, "front", FALLBACK_INDEX[id] ?? null) != null ||
+        pointFromManualOrFallback(ctx, id, "side", FALLBACK_INDEX[id] ?? null) != null
+    );
+  };
+
   const requiredOnView =
-    metric.view === "front"
+    hasRequiredByIds() ??
+    (metric.view === "front"
       ? hasRequiredPoints(ctx.frontAligned, metric.requiredPoints)
       : metric.view === "side"
         ? hasRequiredPoints(ctx.sideAligned, metric.requiredPoints)
         :
             hasRequiredPoints(ctx.frontAligned, metric.requiredPoints) ||
-            hasRequiredPoints(ctx.sideAligned, metric.requiredPoints);
+            hasRequiredPoints(ctx.sideAligned, metric.requiredPoints));
 
   if (!requiredOnView) {
     return {
@@ -862,7 +1154,12 @@ const evaluateMetric = (metric: MetricDefinition, ctx: ScoreContext): MetricResu
             new Set([...ctx.frontQuality.reasonCodes, ...ctx.sideQuality.reasonCodes])
           );
 
-  const confidence = metricBaseConfidence(metric.view, ctx, metric.requiredPoints);
+  const confidence = metricBaseConfidence(
+    metric.view,
+    ctx,
+    metric.requiredPoints,
+    metric.requiredLandmarkIds
+  );
   const confidenceThreshold =
     metric.view === "side" ? 0.16 : metric.view === "either" ? 0.22 : 0.24;
 

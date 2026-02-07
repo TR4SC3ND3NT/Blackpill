@@ -5,7 +5,7 @@ export type Landmark = {
   visibility?: number;
 };
 
-export type ManualLandmarkSource = "auto" | "manual";
+export type ManualLandmarkSource = "auto" | "auto_confirmed" | "manual";
 export type ManualLandmarkView = "front" | "side";
 
 export type ManualLandmarkPoint = {

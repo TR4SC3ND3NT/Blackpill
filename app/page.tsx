@@ -94,8 +94,6 @@ type LandmarkPreviewData = {
 
 type ManualCalibrationResult = {
   manualPoints: ManualLandmarkPoint[];
-  frontLandmarks: Landmark[];
-  sideLandmarks: Landmark[];
 };
 
 const initialProcessing: ProcessingStep[] = [
@@ -535,41 +533,6 @@ const withAbortAndTimeout = async <T,>(
   label: string
 ) => withAbort(withTimeout(promise, timeoutMs, label), signal);
 
-const LandmarkPreviewImage = ({
-  image,
-  landmarks,
-  alt,
-}: {
-  image: ImageState;
-  landmarks: Landmark[];
-  alt: string;
-}) => {
-  const normalized = useMemo(
-    () => normalizeLandmarksForImage(landmarks, image.width, image.height),
-    [landmarks, image.width, image.height]
-  );
-  const aspectRatio = `${Math.max(1, image.width)} / ${Math.max(1, image.height)}`;
-
-  return (
-    <div className={styles.landmarkPreviewWrap} style={{ aspectRatio }}>
-      <img src={image.dataUrl} alt={alt} />
-      <svg className={styles.landmarkOverlay} viewBox="0 0 1 1" preserveAspectRatio="none">
-        {normalized.map((point, index) => (
-          <circle
-            key={`${index}-${point.x.toFixed(4)}-${point.y.toFixed(4)}`}
-            cx={point.x}
-            cy={point.y}
-            r={0.004}
-          />
-        ))}
-      </svg>
-      {!normalized.length ? (
-        <div className={styles.landmarkEmpty}>No landmarks detected.</div>
-      ) : null}
-    </div>
-  );
-};
-
 export default function Home() {
   const router = useRouter();
   const [step, setStep] = useState(0);
@@ -971,8 +934,8 @@ export default function Home() {
       try {
         if (previewData) {
           if (manualCalibration) {
-            frontLandmarks = manualCalibration.frontLandmarks;
-            sideLandmarks = manualCalibration.sideLandmarks;
+            frontLandmarks = previewData.frontLandmarks;
+            sideLandmarks = previewData.sideLandmarks;
             manualLandmarks = manualCalibration.manualPoints;
           } else {
             frontLandmarks = previewData.frontLandmarks;
@@ -1839,55 +1802,35 @@ export default function Home() {
             >
               <Card className={`${styles.homeCard} ${styles.grid}`}>
                 <div>
-                  <strong>Landmark Preview</strong>
+                  <strong>Auto Landmark Preparation</strong>
                   <div className={styles.note}>
-                    Here is how landmarks were placed on both photos. Continue to run the
-                    full analysis.
+                    MediaPipe prepared initial points for both photos. The next step is
+                    manual calibration using front/side landmark registries.
                   </div>
                 </div>
 
-                {previewData ? (
+                {previewData && frontImage && sideImage ? (
                   <div className={styles.landmarkReviewGrid}>
                     <div className={styles.landmarkCard}>
                       <div className={styles.landmarkTitleRow}>
-                        <strong>Front</strong>
+                        <strong>Front Auto Detection</strong>
                         <span className={styles.debugValue}>
-                          {previewData.frontLandmarks.length} points
+                          {previewData.frontLandmarks.length} landmarks
                         </span>
                       </div>
-                      <LandmarkPreviewImage
-                        image={frontImage as ImageState}
-                        landmarks={previewData.frontLandmarks}
-                        alt="Front landmarks preview"
-                      />
+                      <div className={styles.preview}>
+                        <img src={frontImage.dataUrl} alt="Front preview" />
+                      </div>
                       <div className={styles.debugPanel}>
                         <div className={styles.debugRow}>
                           <span className={styles.debugLabel}>method</span>
-                          <span className={styles.debugValue}>
-                            {previewData.frontMethod}
-                          </span>
+                          <span className={styles.debugValue}>{previewData.frontMethod}</span>
                         </div>
                         <div className={styles.debugRow}>
-                          <span className={styles.debugLabel}>quality</span>
+                          <span className={styles.debugLabel}>pose</span>
                           <span className={styles.debugValue}>
-                            {previewData.frontQuality.quality}
-                          </span>
-                        </div>
-                        <div className={styles.debugRow}>
-                          <span className={styles.debugLabel}>pose yaw</span>
-                          <span className={styles.debugValue}>
-                            {formatNumber(previewData.frontQuality.poseYaw)}
-                          </span>
-                        </div>
-                        <div className={styles.debugRow}>
-                          <span className={styles.debugLabel}>pose pitch</span>
-                          <span className={styles.debugValue}>
-                            {formatNumber(previewData.frontQuality.posePitch)}
-                          </span>
-                        </div>
-                        <div className={styles.debugRow}>
-                          <span className={styles.debugLabel}>pose roll</span>
-                          <span className={styles.debugValue}>
+                            y{formatNumber(previewData.frontQuality.poseYaw)} p
+                            {formatNumber(previewData.frontQuality.posePitch)} r
                             {formatNumber(previewData.frontQuality.poseRoll)}
                           </span>
                         </div>
@@ -1897,121 +1840,34 @@ export default function Home() {
                             {previewData.frontQuality.detectedView}
                           </span>
                         </div>
-                        <div className={styles.debugRow}>
-                          <span className={styles.debugLabel}>pose source</span>
-                          <span className={styles.debugValue}>
-                            {previewData.frontPose.source}
-                          </span>
-                        </div>
-                        <div className={styles.debugRow}>
-                          <span className={styles.debugLabel}>pose selected</span>
-                          <span className={styles.debugValue}>
-                            {previewData.frontPose.selectedLabel ?? "--"}
-                          </span>
-                        </div>
-                        <div className={styles.debugRow}>
-                          <span className={styles.debugLabel}>confidence</span>
-                          <span className={styles.debugValue}>
-                            {formatNumber(previewData.frontQuality.confidence, 2)}
-                          </span>
-                        </div>
-                        <div className={styles.debugRow}>
-                          <span className={styles.debugLabel}>view valid</span>
-                          <span className={styles.debugValue}>
-                            {formatBool(previewData.frontQuality.viewValid)}
-                          </span>
-                        </div>
-                        <div className={styles.debugRow}>
-                          <span className={styles.debugLabel}>view weight</span>
-                          <span className={styles.debugValue}>
-                            {formatNumber(previewData.frontQuality.viewWeight, 2)}
-                          </span>
-                        </div>
-                        <div className={styles.debugRow}>
-                          <span className={styles.debugLabel}>transformed</span>
-                          <span className={styles.debugValue}>
-                            {formatBool(previewData.frontTransformed)}
-                          </span>
-                        </div>
-                        <div className={styles.debugRow}>
-                          <span className={styles.debugLabel}>reason codes</span>
-                          <span className={styles.debugMono}>
-                            {formatReasonCodes(previewData.frontQuality.reasonCodes)}
-                          </span>
-                        </div>
-                        <div className={styles.debugRow}>
-                          <span className={styles.debugLabel}>pose candidates</span>
-                          <span className={styles.debugMono}>
-                            {previewData.frontPose.candidates
-                              ?.slice(0, 2)
-                              .map(
-                                (candidate) =>
-                                  `${candidate.label}: y${candidate.yaw.toFixed(1)} p${candidate.pitch.toFixed(1)} r${candidate.roll.toFixed(1)}`
-                              )
-                              .join(" | ") ?? "--"}
-                          </span>
-                        </div>
                       </div>
                     </div>
-
                     <div className={styles.landmarkCard}>
                       <div className={styles.landmarkTitleRow}>
-                        <strong>Side</strong>
+                        <strong>Side Auto Detection</strong>
                         <span className={styles.debugValue}>
-                          {previewData.sideLandmarks.length} points
+                          {previewData.sideLandmarks.length} landmarks
                         </span>
                       </div>
-                      <LandmarkPreviewImage
-                        image={sideImage as ImageState}
-                        landmarks={previewData.sideLandmarks}
-                        alt="Side landmarks preview"
-                      />
+                      <div className={styles.preview}>
+                        <img src={sideImage.dataUrl} alt="Side preview" />
+                      </div>
                       <div className={styles.debugPanel}>
                         <div className={styles.debugRow}>
                           <span className={styles.debugLabel}>method</span>
-                          <span className={styles.debugValue}>
-                            {previewData.sideMethod}
-                          </span>
+                          <span className={styles.debugValue}>{previewData.sideMethod}</span>
                         </div>
                         <div className={styles.debugRow}>
-                          <span className={styles.debugLabel}>bbox found</span>
-                          <span className={styles.debugValue}>
-                            {formatBool(previewData.sideBboxFound)}
-                          </span>
-                        </div>
-                        <div className={styles.debugRow}>
-                          <span className={styles.debugLabel}>bbox (x y w h)</span>
+                          <span className={styles.debugLabel}>bbox</span>
                           <span className={styles.debugValue}>
                             {formatBbox(previewData.sideBbox)}
                           </span>
                         </div>
                         <div className={styles.debugRow}>
-                          <span className={styles.debugLabel}>scale</span>
+                          <span className={styles.debugLabel}>pose</span>
                           <span className={styles.debugValue}>
-                            {formatNumber(previewData.sideScaleApplied, 2)}
-                          </span>
-                        </div>
-                        <div className={styles.debugRow}>
-                          <span className={styles.debugLabel}>quality</span>
-                          <span className={styles.debugValue}>
-                            {previewData.sideQuality.quality}
-                          </span>
-                        </div>
-                        <div className={styles.debugRow}>
-                          <span className={styles.debugLabel}>pose yaw</span>
-                          <span className={styles.debugValue}>
-                            {formatNumber(previewData.sideQuality.poseYaw)}
-                          </span>
-                        </div>
-                        <div className={styles.debugRow}>
-                          <span className={styles.debugLabel}>pose pitch</span>
-                          <span className={styles.debugValue}>
-                            {formatNumber(previewData.sideQuality.posePitch)}
-                          </span>
-                        </div>
-                        <div className={styles.debugRow}>
-                          <span className={styles.debugLabel}>pose roll</span>
-                          <span className={styles.debugValue}>
+                            y{formatNumber(previewData.sideQuality.poseYaw)} p
+                            {formatNumber(previewData.sideQuality.posePitch)} r
                             {formatNumber(previewData.sideQuality.poseRoll)}
                           </span>
                         </div>
@@ -2019,60 +1875,6 @@ export default function Home() {
                           <span className={styles.debugLabel}>view</span>
                           <span className={styles.debugValue}>
                             {previewData.sideQuality.detectedView}
-                          </span>
-                        </div>
-                        <div className={styles.debugRow}>
-                          <span className={styles.debugLabel}>pose source</span>
-                          <span className={styles.debugValue}>
-                            {previewData.sidePose.source}
-                          </span>
-                        </div>
-                        <div className={styles.debugRow}>
-                          <span className={styles.debugLabel}>pose selected</span>
-                          <span className={styles.debugValue}>
-                            {previewData.sidePose.selectedLabel ?? "--"}
-                          </span>
-                        </div>
-                        <div className={styles.debugRow}>
-                          <span className={styles.debugLabel}>confidence</span>
-                          <span className={styles.debugValue}>
-                            {formatNumber(previewData.sideQuality.confidence, 2)}
-                          </span>
-                        </div>
-                        <div className={styles.debugRow}>
-                          <span className={styles.debugLabel}>view valid</span>
-                          <span className={styles.debugValue}>
-                            {formatBool(previewData.sideQuality.viewValid)}
-                          </span>
-                        </div>
-                        <div className={styles.debugRow}>
-                          <span className={styles.debugLabel}>view weight</span>
-                          <span className={styles.debugValue}>
-                            {formatNumber(previewData.sideQuality.viewWeight, 2)}
-                          </span>
-                        </div>
-                        <div className={styles.debugRow}>
-                          <span className={styles.debugLabel}>transformed</span>
-                          <span className={styles.debugValue}>
-                            {formatBool(previewData.sideTransformed)}
-                          </span>
-                        </div>
-                        <div className={styles.debugRow}>
-                          <span className={styles.debugLabel}>reason codes</span>
-                          <span className={styles.debugMono}>
-                            {formatReasonCodes(previewData.sideQuality.reasonCodes)}
-                          </span>
-                        </div>
-                        <div className={styles.debugRow}>
-                          <span className={styles.debugLabel}>pose candidates</span>
-                          <span className={styles.debugMono}>
-                            {previewData.sidePose.candidates
-                              ?.slice(0, 2)
-                              .map(
-                                (candidate) =>
-                                  `${candidate.label}: y${candidate.yaw.toFixed(1)} p${candidate.pitch.toFixed(1)} r${candidate.roll.toFixed(1)}`
-                              )
-                              .join(" | ") ?? "--"}
                           </span>
                         </div>
                       </div>
@@ -2149,6 +1951,7 @@ export default function Home() {
                     sideLandmarks={previewData.sideLandmarks}
                     frontQuality={previewData.frontQuality}
                     sideQuality={previewData.sideQuality}
+                    profile={{ gender: gender || "male", ethnicity: race || "white" }}
                     initialPoints={manualCalibration?.manualPoints ?? null}
                     onBack={() => setStep(4)}
                     onComplete={(result) => {

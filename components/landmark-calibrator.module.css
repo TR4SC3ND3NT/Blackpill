@@ -14,6 +14,34 @@
   gap: 12px;
 }
 
+.modeRow {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.modeButton {
+  border: 1px solid rgba(12, 24, 46, 0.14);
+  border-radius: 10px;
+  padding: 9px 12px;
+  background: rgba(255, 255, 255, 0.9);
+  color: rgba(12, 24, 46, 0.72);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.modeButton:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.modeButtonActive {
+  border-color: rgba(22, 56, 118, 0.72);
+  background: rgba(15, 29, 61, 0.96);
+  color: #eef4ff;
+}
+
 .stage {
   position: relative;
   width: 100%;
@@ -172,7 +200,7 @@
   border-bottom: 2px solid #0f1f40;
 }
 
-.referencePreview {
+.referencePreviewStatic {
   position: relative;
   height: 220px;
   border-radius: 12px;
@@ -180,25 +208,14 @@
   background: #dfe2e8;
   margin: 12px;
   border: 1px solid rgba(12, 24, 46, 0.1);
+  display: grid;
+  place-items: center;
 }
 
-.referencePreview img {
+.referencePreviewStatic img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
-  transition: transform 0.2s ease;
-}
-
-.referenceTarget {
-  position: absolute;
-  width: 12px;
-  height: 12px;
-  margin-left: -6px;
-  margin-top: -6px;
-  border-radius: 50%;
-  background: #ee4343;
-  border: 2px solid #ffffff;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+  object-fit: contain;
 }
 
 .diagramWrap {
@@ -305,7 +322,7 @@
 
 .actions {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -332,5 +349,9 @@
 
   .actions {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .modeRow {
+    grid-template-columns: minmax(0, 1fr);
   }
 }

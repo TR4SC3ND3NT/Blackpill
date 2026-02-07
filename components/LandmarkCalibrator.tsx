@@ -3,12 +3,13 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
-import type { Landmark, ManualLandmarkPoint, PhotoQuality } from "@/lib/types";
+import type { ManualLandmarkPoint, PhotoQuality } from "@/lib/types";
 import {
   LANDMARK_REGISTRY_BY_ID,
-  applyManualLandmarks,
   countManualCompletion,
+  getReferenceSources,
   initManualLandmarks,
+  type LandmarkCalibrationView,
 } from "@/lib/landmark-registry";
 import Button from "@/components/Button";
 import styles from "./landmark-calibrator.module.css";
@@ -21,17 +22,16 @@ type ImageState = {
 
 type CalibrationResult = {
   manualPoints: ManualLandmarkPoint[];
-  frontLandmarks: Landmark[];
-  sideLandmarks: Landmark[];
 };
 
 type Props = {
   frontImage: ImageState;
   sideImage: ImageState;
-  frontLandmarks: Landmark[];
-  sideLandmarks: Landmark[];
+  frontLandmarks: Array<{ x: number; y: number; z?: number; visibility?: number }>;
+  sideLandmarks: Array<{ x: number; y: number; z?: number; visibility?: number }>;
   frontQuality: PhotoQuality;
   sideQuality: PhotoQuality;
+  profile: { gender: string; ethnicity: string };
   initialPoints?: ManualLandmarkPoint[] | null;
   onBack: () => void;
   onComplete: (result: CalibrationResult) => void;
@@ -39,13 +39,21 @@ type Props = {
 
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
 
-const hasManualFixRequirement = (point: ManualLandmarkPoint) => {
-  if (point.source === "manual") return false;
+const hasLowConfidenceWarning = (point: ManualLandmarkPoint) => {
   if (point.confidence < 0.58) return true;
   return point.reasonCodes.some((reason) =>
-    ["manual_required", "hair_occlusion", "occlusion", "edge_point"].includes(reason)
+    ["manual_recommended", "hair_occlusion", "occlusion", "edge_point"].includes(reason)
   );
 };
+
+const toLocalIndices = (
+  points: ManualLandmarkPoint[],
+  view: LandmarkCalibrationView
+): number[] =>
+  points.reduce<number[]>((acc, point, index) => {
+    if (point.view === view) acc.push(index);
+    return acc;
+  }, []);
 
 export default function LandmarkCalibrator({
   frontImage,
@@ -54,16 +62,20 @@ export default function LandmarkCalibrator({
   sideLandmarks,
   frontQuality,
   sideQuality,
+  profile,
   initialPoints,
   onBack,
   onComplete,
 }: Props) {
   const [points, setPoints] = useState<ManualLandmarkPoint[]>([]);
-  const [activeIndex, setActiveIndex] = useState(0);
   const [activeTab, setActiveTab] = useState<"photo" | "diagram" | "howto">("photo");
+  const [activeView, setActiveView] = useState<LandmarkCalibrationView>("front");
+  const [frontCursor, setFrontCursor] = useState(0);
+  const [sideCursor, setSideCursor] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [zoomLevel, setZoomLevel] = useState<1 | 2 | 4>(1);
   const [dragging, setDragging] = useState(false);
+  const [referenceFallbackRemote, setReferenceFallbackRemote] = useState(false);
 
   const stageRef = useRef<HTMLDivElement | null>(null);
   const initialMapRef = useRef<Map<string, ManualLandmarkPoint>>(new Map());
@@ -78,10 +90,14 @@ export default function LandmarkCalibrator({
             frontQuality,
             sideQuality,
           });
+
     setPoints(seeded);
-    setActiveIndex(0);
     setActiveTab("photo");
+    setActiveView("front");
+    setFrontCursor(0);
+    setSideCursor(0);
     setError(null);
+    setReferenceFallbackRemote(false);
     initialMapRef.current = new Map(seeded.map((point) => [point.id, { ...point }]));
   }, [
     initialPoints,
@@ -91,7 +107,18 @@ export default function LandmarkCalibrator({
     sideQuality,
   ]);
 
-  const activePoint = points[activeIndex] ?? null;
+  const frontIndices = useMemo(() => toLocalIndices(points, "front"), [points]);
+  const sideIndices = useMemo(() => toLocalIndices(points, "side"), [points]);
+
+  const sideReadyForCalibration = useMemo(
+    () => sideQuality.landmarkCount > 0 && sideQuality.viewWeight > 0.1,
+    [sideQuality]
+  );
+
+  const activeIndices = activeView === "front" ? frontIndices : sideIndices;
+  const currentCursor = activeView === "front" ? frontCursor : sideCursor;
+  const activeGlobalIndex = activeIndices[currentCursor] ?? activeIndices[0] ?? -1;
+  const activePoint = activeGlobalIndex >= 0 ? points[activeGlobalIndex] : null;
 
   const activeImage =
     activePoint?.view === "side"
@@ -99,13 +126,6 @@ export default function LandmarkCalibrator({
       : activePoint?.view === "front"
         ? frontImage
         : null;
-
-  const completion = useMemo(() => countManualCompletion(points), [points]);
-
-  const progressPercent = useMemo(() => {
-    if (!completion.total) return 0;
-    return Math.round((completion.totalConfirmed / completion.total) * 100);
-  }, [completion]);
 
   const activeDefinition = useMemo(() => {
     if (!activePoint) return null;
@@ -117,11 +137,17 @@ export default function LandmarkCalibrator({
     return points.filter((point) => point.view === activePoint.view);
   }, [points, activePoint]);
 
+  const completionFront = useMemo(() => countManualCompletion(points, "front"), [points]);
+  const completionSide = useMemo(() => countManualCompletion(points, "side"), [points]);
+  const completionAll = useMemo(() => countManualCompletion(points), [points]);
+
+  const canFinish = completionFront.ready && (sideReadyForCalibration ? completionSide.ready : true);
+
   const updateActivePoint = (patch: Partial<ManualLandmarkPoint>) => {
     if (!activePoint) return;
     setPoints((prev) =>
       prev.map((point, index) =>
-        index === activeIndex
+        index === activeGlobalIndex
           ? {
               ...point,
               ...patch,
@@ -137,7 +163,7 @@ export default function LandmarkCalibrator({
       x: clamp01(x),
       y: clamp01(y),
       source: "manual",
-      confidence: Math.max(activePoint.confidence, 0.92),
+      confidence: Math.max(activePoint.confidence, 0.93),
       reasonCodes: Array.from(new Set([...activePoint.reasonCodes, "manual_adjusted"])),
       confirmed: false,
     });
@@ -145,7 +171,10 @@ export default function LandmarkCalibrator({
 
   const moveByPixels = (dxPx: number, dyPx: number) => {
     if (!activePoint || !activeImage) return;
-    movePointTo(activePoint.x + dxPx / Math.max(1, activeImage.width), activePoint.y + dyPx / Math.max(1, activeImage.height));
+    movePointTo(
+      activePoint.x + dxPx / Math.max(1, activeImage.width),
+      activePoint.y + dyPx / Math.max(1, activeImage.height)
+    );
   };
 
   const setByPointerEvent = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -158,27 +187,29 @@ export default function LandmarkCalibrator({
     movePointTo(x, y);
   };
 
-  const goToPrev = () => {
+  const jumpRelative = (delta: number) => {
+    if (!activeIndices.length) return;
+    if (activeView === "front") {
+      setFrontCursor((index) => Math.max(0, Math.min(activeIndices.length - 1, index + delta)));
+    } else {
+      setSideCursor((index) => Math.max(0, Math.min(activeIndices.length - 1, index + delta)));
+    }
     setError(null);
-    setActiveIndex((index) => Math.max(0, index - 1));
+    setReferenceFallbackRemote(false);
   };
 
   const confirmCurrent = () => {
-    if (!activePoint) return false;
-    if (hasManualFixRequirement(activePoint)) {
-      setError("This point requires manual adjustment before confirmation.");
-      return false;
-    }
-
-    updateActivePoint({ confirmed: true });
+    if (!activePoint) return;
+    updateActivePoint({
+      confirmed: true,
+      source: activePoint.source === "manual" ? "manual" : "auto_confirmed",
+    });
     setError(null);
-    return true;
   };
 
   const confirmAndAdvance = () => {
-    const ok = confirmCurrent();
-    if (!ok) return;
-    setActiveIndex((index) => Math.min(points.length - 1, index + 1));
+    confirmCurrent();
+    jumpRelative(1);
   };
 
   const resetCurrentPoint = () => {
@@ -186,23 +217,18 @@ export default function LandmarkCalibrator({
     const initial = initialMapRef.current.get(activePoint.id);
     if (!initial) return;
     setPoints((prev) =>
-      prev.map((point, index) => (index === activeIndex ? { ...initial } : point))
+      prev.map((point, index) => (index === activeGlobalIndex ? { ...initial } : point))
     );
+    setReferenceFallbackRemote(false);
     setError(null);
   };
 
   const finishCalibration = () => {
-    if (!completion.ready) {
-      setError("Confirm all required landmark points before continuing.");
+    if (!canFinish) {
+      setError("Confirm all required calibration points before continuing.");
       return;
     }
-
-    const { front, side } = applyManualLandmarks(frontLandmarks, sideLandmarks, points);
-    onComplete({
-      manualPoints: points,
-      frontLandmarks: front,
-      sideLandmarks: side,
-    });
+    onComplete({ manualPoints: points });
   };
 
   useEffect(() => {
@@ -224,7 +250,7 @@ export default function LandmarkCalibrator({
       }
       if (event.key === "Backspace") {
         event.preventDefault();
-        goToPrev();
+        jumpRelative(-1);
         return;
       }
       if (event.key.toLowerCase() === "r") {
@@ -254,19 +280,64 @@ export default function LandmarkCalibrator({
       window.removeEventListener("keydown", onKeyDown);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activePoint, activeImage, points, activeIndex]);
+  }, [activePoint, activeImage, points, activeGlobalIndex, activeView]);
 
   if (!activePoint || !activeImage) {
     return <div className={styles.empty}>Preparing landmark calibration...</div>;
   }
 
-  const stepText = `${activeIndex + 1} of ${points.length}`;
+  const stepText = `${currentCursor + 1} of ${activeIndices.length}`;
   const confidencePercent = Math.round(activePoint.confidence * 100);
-  const manualRequired = hasManualFixRequirement(activePoint);
+  const lowConfidenceWarning = hasLowConfidenceWarning(activePoint);
+
+  const referenceSources = activeDefinition
+    ? getReferenceSources(activeDefinition, {
+        gender: profile.gender,
+        ethnicity: profile.ethnicity,
+      })
+    : null;
+
+  const referenceSrc =
+    referenceSources == null
+      ? ""
+      : referenceFallbackRemote
+        ? referenceSources.remote
+        : referenceSources.local;
 
   return (
     <div className={styles.layout}>
       <div className={styles.stageWrap}>
+        <div className={styles.modeRow}>
+          <button
+            type="button"
+            className={`${styles.modeButton} ${activeView === "front" ? styles.modeButtonActive : ""}`}
+            onClick={() => {
+              setActiveView("front");
+              setReferenceFallbackRemote(false);
+            }}
+          >
+            Front Calibration ({completionFront.totalConfirmed}/{completionFront.total})
+          </button>
+          <button
+            type="button"
+            className={`${styles.modeButton} ${activeView === "side" ? styles.modeButtonActive : ""}`}
+            onClick={() => {
+              setActiveView("side");
+              setReferenceFallbackRemote(false);
+            }}
+            disabled={!sideIndices.length}
+          >
+            Side Calibration ({completionSide.totalConfirmed}/{completionSide.total})
+          </button>
+        </div>
+
+        {!sideReadyForCalibration && activeView === "side" ? (
+          <div className={styles.warning}>
+            Side photo is not suitable for profile metrics. Side calibration is optional and
+            side metrics may remain insufficient.
+          </div>
+        ) : null}
+
         <div
           className={styles.stage}
           ref={stageRef}
@@ -281,7 +352,9 @@ export default function LandmarkCalibrator({
           onPointerUp={() => setDragging(false)}
           onPointerLeave={() => setDragging(false)}
           onPointerCancel={() => setDragging(false)}
-          style={{ aspectRatio: `${Math.max(1, activeImage.width)} / ${Math.max(1, activeImage.height)}` }}
+          style={{
+            aspectRatio: `${Math.max(1, activeImage.width)} / ${Math.max(1, activeImage.height)}`,
+          }}
         >
           <img src={activeImage.dataUrl} alt={`${activePoint.view} calibration`} />
           <svg className={styles.overlay} viewBox="0 0 1 1" preserveAspectRatio="none">
@@ -300,8 +373,20 @@ export default function LandmarkCalibrator({
                 }
               />
             ))}
-            <line x1={activePoint.x - 0.02} y1={activePoint.y} x2={activePoint.x + 0.02} y2={activePoint.y} className={styles.crosshair} />
-            <line x1={activePoint.x} y1={activePoint.y - 0.02} x2={activePoint.x} y2={activePoint.y + 0.02} className={styles.crosshair} />
+            <line
+              x1={activePoint.x - 0.02}
+              y1={activePoint.y}
+              x2={activePoint.x + 0.02}
+              y2={activePoint.y}
+              className={styles.crosshair}
+            />
+            <line
+              x1={activePoint.x}
+              y1={activePoint.y - 0.02}
+              x2={activePoint.x}
+              y2={activePoint.y + 0.02}
+              className={styles.crosshair}
+            />
           </svg>
         </div>
 
@@ -311,8 +396,8 @@ export default function LandmarkCalibrator({
             <span>{activePoint.name}</span>
             <span className={styles.muted}>Auto confidence: {confidencePercent}%</span>
           </div>
-          {manualRequired ? (
-            <div className={styles.warning}>Manual adjustment required for this point.</div>
+          {lowConfidenceWarning ? (
+            <div className={styles.warning}>Low confidence. Please verify and adjust if needed.</div>
           ) : null}
         </div>
       </div>
@@ -321,10 +406,15 @@ export default function LandmarkCalibrator({
         <div className={styles.progressCard}>
           <div className={styles.progressHead}>
             <span>{stepText}</span>
-            <span>{progressPercent}%</span>
+            <span>{Math.round((completionAll.totalConfirmed / Math.max(1, completionAll.total)) * 100)}%</span>
           </div>
           <div className={styles.progressTrack}>
-            <div className={styles.progressFill} style={{ width: `${progressPercent}%` }} />
+            <div
+              className={styles.progressFill}
+              style={{
+                width: `${Math.round((completionAll.totalConfirmed / Math.max(1, completionAll.total)) * 100)}%`,
+              }}
+            />
           </div>
 
           <h3 className={styles.pointTitle}>{activePoint.name}</h3>
@@ -357,19 +447,20 @@ export default function LandmarkCalibrator({
           </div>
 
           {activeTab === "photo" ? (
-            <div className={styles.referencePreview}>
-              <img
-                src={activeImage.dataUrl}
-                alt="Reference"
-                style={{
-                  transform: `scale(${zoomLevel})`,
-                  transformOrigin: `${activePoint.x * 100}% ${activePoint.y * 100}%`,
-                }}
-              />
-              <div
-                className={styles.referenceTarget}
-                style={{ left: `${activePoint.x * 100}%`, top: `${activePoint.y * 100}%` }}
-              />
+            <div className={styles.referencePreviewStatic}>
+              {referenceSrc ? (
+                <img
+                  src={referenceSrc}
+                  alt={`Reference for ${activePoint.name}`}
+                  onError={() => {
+                    if (!referenceFallbackRemote) {
+                      setReferenceFallbackRemote(true);
+                    }
+                  }}
+                />
+              ) : (
+                <div className={styles.muted}>No reference image available.</div>
+              )}
             </div>
           ) : null}
 
@@ -382,11 +473,13 @@ export default function LandmarkCalibrator({
                     cx={point.x}
                     cy={point.y}
                     r={point.id === activePoint.id ? 0.02 : 0.012}
-                    className={point.id === activePoint.id ? styles.diagramActive : styles.diagramPoint}
+                    className={
+                      point.id === activePoint.id ? styles.diagramActive : styles.diagramPoint
+                    }
                   />
                 ))}
               </svg>
-              <div className={styles.muted}>Active landmark highlighted in red.</div>
+              <div className={styles.muted}>Static guide. Active landmark highlighted in red.</div>
             </div>
           ) : null}
 
@@ -394,13 +487,15 @@ export default function LandmarkCalibrator({
             <div className={styles.howToWrap}>
               <p>{activeDefinition?.howToFind ?? "Use the most central visible anatomical point."}</p>
               <div className={styles.reasonList}>
-                {activePoint.reasonCodes.length
-                  ? activePoint.reasonCodes.map((reason) => (
-                      <span key={reason} className={styles.reasonChip}>
-                        {reason}
-                      </span>
-                    ))
-                  : <span className={styles.reasonChip}>no-flags</span>}
+                {activePoint.reasonCodes.length ? (
+                  activePoint.reasonCodes.map((reason) => (
+                    <span key={reason} className={styles.reasonChip}>
+                      {reason}
+                    </span>
+                  ))
+                ) : (
+                  <span className={styles.reasonChip}>no-flags</span>
+                )}
               </div>
             </div>
           ) : null}
@@ -408,10 +503,22 @@ export default function LandmarkCalibrator({
 
         <div className={styles.shortcutCard}>
           <div className={styles.shortcutTitle}>Keyboard shortcuts</div>
-          <div className={styles.shortcutRow}><code>↑ ↓ ← →</code><span>Move point</span></div>
-          <div className={styles.shortcutRow}><code>Enter</code><span>Confirm / Next</span></div>
-          <div className={styles.shortcutRow}><code>Backspace</code><span>Previous</span></div>
-          <div className={styles.shortcutRow}><code>R</code><span>Reset current</span></div>
+          <div className={styles.shortcutRow}>
+            <code>↑ ↓ ← →</code>
+            <span>Move point</span>
+          </div>
+          <div className={styles.shortcutRow}>
+            <code>Enter</code>
+            <span>Confirm / Next</span>
+          </div>
+          <div className={styles.shortcutRow}>
+            <code>Backspace</code>
+            <span>Previous</span>
+          </div>
+          <div className={styles.shortcutRow}>
+            <code>R</code>
+            <span>Reset current</span>
+          </div>
         </div>
 
         <div className={styles.zoomCard}>
@@ -436,11 +543,15 @@ export default function LandmarkCalibrator({
           <Button variant="ghost" onClick={onBack}>
             Back
           </Button>
-          <Button variant="ghost" onClick={goToPrev}>
+          <Button variant="ghost" onClick={() => jumpRelative(-1)}>
             Previous
           </Button>
+          <Button onClick={confirmCurrent}>Confirm</Button>
           <Button onClick={confirmAndAdvance}>Next</Button>
-          <Button onClick={finishCalibration} disabled={!completion.ready}>
+          <Button variant="ghost" onClick={resetCurrentPoint}>
+            Reset
+          </Button>
+          <Button onClick={finishCalibration} disabled={!canFinish}>
             Continue to Analysis
           </Button>
         </div>
