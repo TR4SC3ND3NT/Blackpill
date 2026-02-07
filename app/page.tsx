@@ -414,7 +414,6 @@ export default function Home() {
   const [previewStatus, setPreviewStatus] = useState<string | null>(null);
   const [manualCalibration, setManualCalibration] =
     useState<ManualCalibrationResult | null>(null);
-  const [warmupStatus, setWarmupStatus] = useState<string | null>(null);
   const [warmupError, setWarmupError] = useState<string | null>(null);
   const inFlightRef = useRef(false);
   const hasRunRef = useRef(false);
@@ -485,7 +484,6 @@ export default function Home() {
       setPreviewStatus(null);
       setManualCalibration(null);
       setWarmupError(null);
-      setWarmupStatus(null);
       setActiveDropZone(null);
       warmupTriggeredRef.current = false;
       previewRequestKeyRef.current = null;
@@ -532,7 +530,6 @@ export default function Home() {
     const controller = new AbortController();
     warmupTriggeredRef.current = true;
     setWarmupError(null);
-    setWarmupStatus("Loading WASM...");
 
     const timerLabel = `[preview] warmup-${Date.now()}`;
     console.time(timerLabel);
@@ -542,7 +539,7 @@ export default function Home() {
         signal: controller.signal,
         onStatus: (status) => {
           if (!active) return;
-          setWarmupStatus(status);
+          setPreviewStatus(status);
         },
       }),
       controller.signal,
@@ -551,7 +548,7 @@ export default function Home() {
     )
       .then(() => {
         if (!active) return;
-        setWarmupStatus("MediaPipe ready.");
+        setPreviewStatus("Preview ready.");
       })
       .catch((reason) => {
         if (!active || isAbortError(reason)) return;
@@ -560,7 +557,6 @@ export default function Home() {
             ? reason.message
             : "Could not load MediaPipe runtime/models.";
         setWarmupError(message);
-        setWarmupStatus(null);
         warmupTriggeredRef.current = false;
       })
       .finally(() => {
