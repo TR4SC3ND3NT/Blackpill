@@ -194,7 +194,7 @@ const initConfidence = (
   };
 };
 
-const FRONT_REGISTRY: LandmarkCalibrationDef[] = [
+const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
   {
     id: "trichion",
     name: "Hairline",
@@ -206,8 +206,8 @@ const FRONT_REGISTRY: LandmarkCalibrationDef[] = [
     required: false,
     forceManual: true,
     hairSensitive: true,
-    assetKey: "forehead",
-    referenceFallbackKeys: ["trichion"],
+    assetKey: "trichion",
+    referenceFallbackKeys: ["forehead"],
   },
   {
     id: "forehead",
@@ -578,8 +578,8 @@ const FRONT_REGISTRY: LandmarkCalibrationDef[] = [
     howToFind: "Most anterior point on upper vermillion border.",
     mediapipeIndex: 13,
     required: false,
-    assetKey: "cupidsBow",
-    referenceFallbackKeys: ["labraleSuperius"],
+    assetKey: "labraleSuperius",
+    referenceFallbackKeys: ["cupidsBow"],
   },
   {
     id: "labrale_inferius",
@@ -589,8 +589,8 @@ const FRONT_REGISTRY: LandmarkCalibrationDef[] = [
     howToFind: "Most anterior point on lower vermillion border.",
     mediapipeIndex: 14,
     required: true,
-    assetKey: "lowerLip",
-    referenceFallbackKeys: ["labraleInferius"],
+    assetKey: "labraleInferius",
+    referenceFallbackKeys: ["lowerLip"],
   },
   {
     id: "lower_lip",
@@ -680,8 +680,8 @@ const FRONT_REGISTRY: LandmarkCalibrationDef[] = [
     howToFind: "Lowest median point of chin.",
     mediapipeIndex: 152,
     required: true,
-    assetKey: "chinBottom",
-    referenceFallbackKeys: ["menton"],
+    assetKey: "menton",
+    referenceFallbackKeys: ["chinBottom"],
   },
   {
     id: "left_cheek",
@@ -724,6 +724,69 @@ const FRONT_REGISTRY: LandmarkCalibrationDef[] = [
     assetKey: "rightTemple",
   },
 ];
+
+const FRONT_REGISTRY_ORDER = [
+  "trichion",
+  "forehead",
+  "glabella",
+  "nasion",
+  "left_eye_pupil",
+  "right_eye_pupil",
+  "left_eye_medial_canthus",
+  "right_eye_medial_canthus",
+  "left_eye_lateral_canthus",
+  "right_eye_lateral_canthus",
+  "left_eye_upper_eyelid",
+  "right_eye_upper_eyelid",
+  "left_eye_lower_eyelid",
+  "right_eye_lower_eyelid",
+  "left_eyelid_hood_end",
+  "right_eyelid_hood_end",
+  "left_upper_eyelid_crease",
+  "right_upper_eyelid_crease",
+  "left_brow_head",
+  "right_brow_head",
+  "left_brow_inner_corner",
+  "right_brow_inner_corner",
+  "left_brow_arch",
+  "right_brow_arch",
+  "left_brow_peak",
+  "right_brow_peak",
+  "left_brow_tail",
+  "right_brow_tail",
+  "nasal_base",
+  "nose_bottom",
+  "left_nose_bridge",
+  "right_nose_bridge",
+  "mouth_left",
+  "mouth_right",
+  "mouth_middle",
+  "cupids_bow",
+  "inner_cupids_bow",
+  "labrale_superius",
+  "labrale_inferius",
+  "lower_lip",
+  "left_top_gonion",
+  "right_top_gonion",
+  "left_bottom_gonion",
+  "right_bottom_gonion",
+  "chin_left",
+  "chin_right",
+  "chin_bottom",
+  "menton",
+  "left_cheek",
+  "right_cheek",
+  "left_temple",
+  "right_temple",
+] as const;
+
+const FRONT_REGISTRY: LandmarkCalibrationDef[] = FRONT_REGISTRY_ORDER.map((id) => {
+  const definition = FRONT_REGISTRY_RAW.find((item) => item.id === id);
+  if (!definition) {
+    throw new Error(`Missing front landmark definition for '${id}'.`);
+  }
+  return definition;
+});
 
 const SIDE_REGISTRY: LandmarkCalibrationDef[] = [
   {
