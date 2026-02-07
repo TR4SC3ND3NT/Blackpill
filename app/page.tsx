@@ -2,6 +2,7 @@
 /* eslint-disable @next/next/no-img-element */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { DragEvent as ReactDragEvent } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import imageCompression from "browser-image-compression";
 import { useRouter } from "next/navigation";
@@ -38,41 +39,6 @@ type ProcessingStep = {
 };
 
 type ExpectedView = "front" | "side";
-
-type UploadDebug = {
-  width: number;
-  height: number;
-  naturalWidth: number;
-  naturalHeight: number;
-  minSidePx: number;
-  blurVariance?: number;
-  absYaw?: number;
-  dataUrlLength: number;
-  dataUrlPrefix: string;
-  method?: string;
-  landmarkCount?: number;
-  bboxFound?: boolean;
-  bbox?: { x: number; y: number; width: number; height: number };
-  scaleApplied?: number;
-  poseYaw?: number;
-  posePitch?: number;
-  poseRoll?: number;
-  poseSource?: PoseEstimate["source"];
-  poseConfidence?: number;
-  poseSelectedLabel?: string;
-  poseCandidates?: string;
-  poseMatrix?: string;
-  poseValidFront?: boolean;
-  poseValidSide?: boolean;
-  detectedView?: PhotoQuality["detectedView"];
-  transformed?: boolean;
-  viewValid?: boolean;
-  viewWeight?: number;
-  reasonCodes?: ReasonCode[];
-  landmarksSource: string;
-  evaluateSource: string;
-  error?: string;
-};
 
 type LandmarkPreviewData = {
   frontLandmarks: Landmark[];
@@ -369,110 +335,6 @@ const evaluatePhoto = async (
   };
 };
 
-const buildUploadDebug = async (
-  label: "front" | "side",
-  image: ImageState
-): Promise<UploadDebug> => {
-  const dataUrlPrefix = image.dataUrl.slice(0, 32);
-  const sourceLabel = `${label}Image.dataUrl`;
-  const natural = await loadImageFromDataUrl(image.dataUrl);
-  const naturalWidth = natural.naturalWidth || natural.width || image.width;
-  const naturalHeight = natural.naturalHeight || natural.height || image.height;
-  const minSidePx = Math.min(naturalWidth, naturalHeight);
-  const base: UploadDebug = {
-    width: image.width,
-    height: image.height,
-    naturalWidth,
-    naturalHeight,
-    minSidePx,
-    dataUrlLength: image.dataUrl.length,
-    dataUrlPrefix,
-    landmarksSource: `${sourceLabel} (len=${image.dataUrl.length})`,
-    evaluateSource: `${sourceLabel} (len=${image.dataUrl.length})`,
-  };
-
-  try {
-    let detection: {
-      landmarks: Landmark[];
-      method: string;
-      bboxFound: boolean;
-      bbox?: { x: number; y: number; width: number; height: number };
-      scaleApplied: number;
-      pose: PoseEstimate;
-      transformed: boolean;
-    };
-    if (label === "side") {
-      detection = await detectLandmarksWithBBoxFallback(image.dataUrl, {
-        timeoutMs: PREVIEW_STAGE_TIMEOUT_MS,
-        expectedView: "side",
-      });
-    } else {
-      const frontDetection = await detectLandmarks(image.dataUrl, {
-        timeoutMs: PREVIEW_STAGE_TIMEOUT_MS,
-        expectedView: "front",
-      });
-      detection = {
-        landmarks: frontDetection.landmarks,
-        method: frontDetection.method,
-        bboxFound: false,
-        bbox: undefined,
-        scaleApplied: 1,
-        pose: frontDetection.pose,
-        transformed: frontDetection.transformed,
-      };
-    }
-    const landmarks = detection.landmarks;
-    const qualityCheck = await evaluatePhoto(
-      label === "front" ? "Front" : "Side",
-      image.dataUrl,
-      landmarks,
-      image.width,
-      image.height,
-      label,
-      detection.pose,
-      detection.transformed
-    );
-    return {
-      ...base,
-      method: detection.method,
-      landmarkCount: landmarks.length,
-      bboxFound: detection.bboxFound,
-      bbox: detection.bbox,
-      scaleApplied: detection.scaleApplied,
-      poseYaw: qualityCheck.quality.poseYaw,
-      absYaw: Math.abs(qualityCheck.quality.poseYaw),
-      posePitch: qualityCheck.quality.posePitch,
-      poseRoll: qualityCheck.quality.poseRoll,
-      poseSource: qualityCheck.quality.pose.source,
-      poseConfidence: qualityCheck.quality.pose.confidence,
-      poseSelectedLabel: qualityCheck.quality.pose.selectedLabel,
-      poseCandidates: qualityCheck.quality.pose.candidates
-        ?.slice(0, 2)
-        .map(
-          (candidate) =>
-            `${candidate.label}: y${candidate.yaw.toFixed(1)} p${candidate.pitch.toFixed(1)} r${candidate.roll.toFixed(1)}`
-        )
-        .join(" | "),
-      poseMatrix: qualityCheck.quality.pose.matrix
-        ? qualityCheck.quality.pose.matrix.slice(0, 12).map((value) => value.toFixed(3)).join(" ")
-        : undefined,
-      poseValidFront: qualityCheck.quality.pose.validFront,
-      poseValidSide: qualityCheck.quality.pose.validSide,
-      detectedView: qualityCheck.quality.detectedView,
-      transformed: detection.transformed,
-      viewValid: qualityCheck.quality.viewValid,
-      viewWeight: qualityCheck.quality.viewWeight,
-      reasonCodes: qualityCheck.quality.reasonCodes,
-      blurVariance: qualityCheck.quality.blurVariance,
-    };
-  } catch (error) {
-    return {
-      ...base,
-      error: error instanceof Error ? error.message : "Landmark detection failed.",
-    };
-  }
-};
-
 const mergeIssues = (items: string[]) => Array.from(new Set(items.filter(Boolean)));
 
 const isAbortError = (error: unknown) =>
@@ -538,10 +400,7 @@ export default function Home() {
   const [step, setStep] = useState(0);
   const [frontImage, setFrontImage] = useState<ImageState | null>(null);
   const [sideImage, setSideImage] = useState<ImageState | null>(null);
-  const [frontDebug, setFrontDebug] = useState<UploadDebug | null>(null);
-  const [sideDebug, setSideDebug] = useState<UploadDebug | null>(null);
-  const [frontDebugLoading, setFrontDebugLoading] = useState(false);
-  const [sideDebugLoading, setSideDebugLoading] = useState(false);
+  const [activeDropZone, setActiveDropZone] = useState<"front" | "side" | null>(null);
   const [gender, setGender] = useState("");
   const [race, setRace] = useState("");
   const [consent, setConsent] = useState(false);
@@ -559,6 +418,8 @@ export default function Home() {
   const [warmupError, setWarmupError] = useState<string | null>(null);
   const inFlightRef = useRef(false);
   const hasRunRef = useRef(false);
+  const frontInputRef = useRef<HTMLInputElement | null>(null);
+  const sideInputRef = useRef<HTMLInputElement | null>(null);
   const previewRequestKeyRef = useRef<string | null>(null);
   const warmupTriggeredRef = useRef(false);
 
@@ -615,27 +476,44 @@ export default function Home() {
     []
   );
 
-  const handleFile = async (
-    file: File | undefined,
-    setter: (value: ImageState | null) => void
-  ) => {
-    if (!file) return;
-    setError(null);
-    setPreviewError(null);
-    setPreviewData(null);
-    setPreviewStatus(null);
-    setManualCalibration(null);
-    setWarmupError(null);
-    setWarmupStatus(null);
-    warmupTriggeredRef.current = false;
-    previewRequestKeyRef.current = null;
-    try {
-      const processed = await compressImage(file);
-      setter(processed);
-    } catch {
-      setError("Failed to process the image. Try a different photo.");
-    }
-  };
+  const handleFile = useCallback(
+    async (file: File | undefined, setter: (value: ImageState | null) => void) => {
+      if (!file) return;
+      setError(null);
+      setPreviewError(null);
+      setPreviewData(null);
+      setPreviewStatus(null);
+      setManualCalibration(null);
+      setWarmupError(null);
+      setWarmupStatus(null);
+      setActiveDropZone(null);
+      warmupTriggeredRef.current = false;
+      previewRequestKeyRef.current = null;
+      try {
+        const processed = await compressImage(file);
+        setter(processed);
+      } catch {
+        setError("Failed to process the image. Try a different photo.");
+      }
+    },
+    []
+  );
+
+  const handleDropUpload = useCallback(
+    async (
+      event: ReactDragEvent<HTMLDivElement>,
+      setter: (value: ImageState | null) => void,
+      zone: "front" | "side"
+    ) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setActiveDropZone((prev) => (prev === zone ? null : prev));
+      const file = event.dataTransfer.files?.[0];
+      if (!file) return;
+      await handleFile(file, setter);
+    },
+    [handleFile]
+  );
 
   useEffect(() => {
     setPreviewData(null);
@@ -644,44 +522,6 @@ export default function Home() {
     previewRequestKeyRef.current = null;
     setManualCalibration(null);
   }, [frontImage?.dataUrl, sideImage?.dataUrl]);
-
-  useEffect(() => {
-    let active = true;
-    if (!frontImage || step !== 2) {
-      setFrontDebug(null);
-      return undefined;
-    }
-    setFrontDebugLoading(true);
-    buildUploadDebug("front", frontImage)
-      .then((debug) => {
-        if (active) setFrontDebug(debug);
-      })
-      .finally(() => {
-        if (active) setFrontDebugLoading(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [frontImage, step]);
-
-  useEffect(() => {
-    let active = true;
-    if (!sideImage || step !== 2) {
-      setSideDebug(null);
-      return undefined;
-    }
-    setSideDebugLoading(true);
-    buildUploadDebug("side", sideImage)
-      .then((debug) => {
-        if (active) setSideDebug(debug);
-      })
-      .finally(() => {
-        if (active) setSideDebugLoading(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [sideImage, step]);
 
   useEffect(() => {
     if (!frontImage || !sideImage) return;
@@ -1179,26 +1019,6 @@ export default function Home() {
   }, [step, runPipeline]);
 
   const canProceed = frontImage && sideImage;
-  const formatNumber = (value?: number, digits = 1) =>
-    value == null || Number.isNaN(value) ? "--" : value.toFixed(digits);
-  const formatCount = (value?: number) =>
-    value == null || Number.isNaN(value) ? "--" : Math.round(value).toString();
-  const formatBool = (value?: boolean) =>
-    value == null ? "--" : value ? "yes" : "no";
-  const formatBbox = (
-    bbox?: { x: number; y: number; width: number; height: number }
-  ) =>
-    bbox
-      ? `${Math.round(bbox.x)} ${Math.round(bbox.y)} ${Math.round(
-          bbox.width
-        )} ${Math.round(bbox.height)}`
-      : "--";
-  const formatReasonCodes = (codes?: ReasonCode[]) =>
-    codes && codes.length ? codes.join(", ") : "--";
-  const formatSource = (debug: UploadDebug | null, kind: "landmarks" | "evaluate") =>
-    debug
-      ? `${kind === "landmarks" ? debug.landmarksSource : debug.evaluateSource} [${debug.method ?? "--"}] | ${debug.dataUrlPrefix}...`
-      : "--";
 
   return (
     <main className={styles.homeShell}>
@@ -1361,174 +1181,48 @@ export default function Home() {
                         Straight-on, eyes open, even lighting.
                       </div>
                     </div>
-                    {frontImage ? (
-                      <>
-                        <div className={styles.preview}>
-                          <img src={frontImage.dataUrl} alt="Front preview" />
-                        </div>
-                        <div className={styles.debugPanel}>
-                          <div className={styles.debugRow}>
-                            <span className={styles.debugLabel}>natural</span>
-                            <span className={styles.debugValue}>
-                              {frontDebug?.naturalWidth ?? frontImage.width}×
-                              {frontDebug?.naturalHeight ?? frontImage.height}
-                            </span>
-                          </div>
-                          <div className={styles.debugRow}>
-                            <span className={styles.debugLabel}>min side</span>
-                            <span className={styles.debugValue}>
-                              {formatCount(frontDebug?.minSidePx)}
-                            </span>
-                          </div>
-                          <div className={styles.debugRow}>
-                            <span className={styles.debugLabel}>landmarks</span>
-                            <span className={styles.debugValue}>
-                              {formatCount(frontDebug?.landmarkCount)}
-                            </span>
-                          </div>
-                          <div className={styles.debugRow}>
-                            <span className={styles.debugLabel}>method</span>
-                            <span className={styles.debugValue}>
-                              {frontDebug?.method ?? "--"}
-                            </span>
-                          </div>
-                          <div className={styles.debugRow}>
-                            <span className={styles.debugLabel}>bbox found</span>
-                            <span className={styles.debugValue}>
-                              {formatBool(frontDebug?.bboxFound)}
-                            </span>
-                          </div>
-                          <div className={styles.debugRow}>
-                            <span className={styles.debugLabel}>bbox (x y w h)</span>
-                            <span className={styles.debugValue}>
-                              {formatBbox(frontDebug?.bbox)}
-                            </span>
-                          </div>
-                          <div className={styles.debugRow}>
-                            <span className={styles.debugLabel}>scale</span>
-                            <span className={styles.debugValue}>
-                              {formatNumber(frontDebug?.scaleApplied, 2)}
-                            </span>
-                          </div>
-                          <div className={styles.debugRow}>
-                            <span className={styles.debugLabel}>pose yaw</span>
-                            <span className={styles.debugValue}>
-                              {formatNumber(frontDebug?.poseYaw)}
-                            </span>
-                          </div>
-                          <div className={styles.debugRow}>
-                            <span className={styles.debugLabel}>abs yaw</span>
-                            <span className={styles.debugValue}>
-                              {formatNumber(frontDebug?.absYaw)}
-                            </span>
-                          </div>
-                          <div className={styles.debugRow}>
-                            <span className={styles.debugLabel}>pose pitch</span>
-                            <span className={styles.debugValue}>
-                              {formatNumber(frontDebug?.posePitch)}
-                            </span>
-                          </div>
-                          <div className={styles.debugRow}>
-                            <span className={styles.debugLabel}>pose roll</span>
-                            <span className={styles.debugValue}>
-                              {formatNumber(frontDebug?.poseRoll)}
-                            </span>
-                          </div>
-                          <div className={styles.debugRow}>
-                            <span className={styles.debugLabel}>detected view</span>
-                            <span className={styles.debugValue}>
-                              {frontDebug?.detectedView ?? "--"}
-                            </span>
-                          </div>
-                          <div className={styles.debugRow}>
-                            <span className={styles.debugLabel}>pose source</span>
-                            <span className={styles.debugValue}>
-                              {frontDebug?.poseSource ?? "--"}
-                            </span>
-                          </div>
-                          <div className={styles.debugRow}>
-                            <span className={styles.debugLabel}>pose selected</span>
-                            <span className={styles.debugValue}>
-                              {frontDebug?.poseSelectedLabel ?? "--"}
-                            </span>
-                          </div>
-                          <div className={styles.debugRow}>
-                            <span className={styles.debugLabel}>pose conf</span>
-                            <span className={styles.debugValue}>
-                              {formatNumber(frontDebug?.poseConfidence, 2)}
-                            </span>
-                          </div>
-                          <div className={styles.debugRow}>
-                            <span className={styles.debugLabel}>pose candidates</span>
-                            <span className={styles.debugMono}>
-                              {frontDebug?.poseCandidates ?? "--"}
-                            </span>
-                          </div>
-                          <div className={styles.debugRow}>
-                            <span className={styles.debugLabel}>pose matrix</span>
-                            <span className={styles.debugMono}>
-                              {frontDebug?.poseMatrix ?? "--"}
-                            </span>
-                          </div>
-                          <div className={styles.debugRow}>
-                            <span className={styles.debugLabel}>view valid</span>
-                            <span className={styles.debugValue}>
-                              {formatBool(frontDebug?.viewValid)}
-                            </span>
-                          </div>
-                          <div className={styles.debugRow}>
-                            <span className={styles.debugLabel}>view weight</span>
-                            <span className={styles.debugValue}>
-                              {formatNumber(frontDebug?.viewWeight, 2)}
-                            </span>
-                          </div>
-                          <div className={styles.debugRow}>
-                            <span className={styles.debugLabel}>transformed</span>
-                            <span className={styles.debugValue}>
-                              {formatBool(frontDebug?.transformed)}
-                            </span>
-                          </div>
-                          <div className={styles.debugRow}>
-                            <span className={styles.debugLabel}>blur var</span>
-                            <span className={styles.debugValue}>
-                              {formatNumber(frontDebug?.blurVariance)}
-                            </span>
-                          </div>
-                          <div className={styles.debugRow}>
-                            <span className={styles.debugLabel}>reason codes</span>
-                            <span className={styles.debugMono}>
-                              {formatReasonCodes(frontDebug?.reasonCodes)}
-                            </span>
-                          </div>
-                          <div className={styles.debugRow}>
-                            <span className={styles.debugLabel}>landmarks src</span>
-                            <span className={styles.debugMono}>
-                              {formatSource(frontDebug, "landmarks")}
-                            </span>
-                          </div>
-                          <div className={styles.debugRow}>
-                            <span className={styles.debugLabel}>evaluate src</span>
-                            <span className={styles.debugMono}>
-                              {formatSource(frontDebug, "evaluate")}
-                            </span>
-                          </div>
-                          {frontDebugLoading ? (
-                            <div className={styles.debugHint}>detecting...</div>
-                          ) : null}
-                          {frontDebug?.error ? (
-                            <div className={styles.debugError}>
-                              {frontDebug.error}
-                            </div>
-                          ) : null}
-                        </div>
-                      </>
-                    ) : null}
+                    <div className={styles.preview}>
+                      {frontImage ? (
+                        <img src={frontImage.dataUrl} alt="Front preview" />
+                      ) : (
+                        <div className={styles.previewPlaceholder}>Front photo preview</div>
+                      )}
+                    </div>
+                    <div
+                      className={`${styles.dropZone} ${
+                        activeDropZone === "front" ? styles.dropZoneActive : ""
+                      }`}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => frontInputRef.current?.click()}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          frontInputRef.current?.click();
+                        }
+                      }}
+                      onDragOver={(event) => {
+                        event.preventDefault();
+                        setActiveDropZone("front");
+                      }}
+                      onDragLeave={(event) => {
+                        if (event.currentTarget.contains(event.relatedTarget as Node)) return;
+                        setActiveDropZone((prev) => (prev === "front" ? null : prev));
+                      }}
+                      onDrop={(event) => void handleDropUpload(event, setFrontImage, "front")}
+                    >
+                      <div className={styles.dropTitle}>
+                        {frontImage ? "Replace front photo" : "Drop front photo here"}
+                      </div>
+                      <div className={styles.dropHint}>or click to browse</div>
+                    </div>
                     <input
-                      className={styles.fileInput}
+                      ref={frontInputRef}
+                      className={styles.hiddenFileInput}
                       type="file"
                       accept="image/*"
                       onChange={(event) =>
-                        handleFile(event.target.files?.[0], setFrontImage)
+                        void handleFile(event.target.files?.[0], setFrontImage)
                       }
                     />
                   </div>
@@ -1538,172 +1232,48 @@ export default function Home() {
                       <strong>Side Photo</strong>
                       <div className={styles.note}>Clear profile, chin neutral.</div>
                     </div>
-                    {sideImage ? (
-                      <>
-                        <div className={styles.preview}>
-                          <img src={sideImage.dataUrl} alt="Side preview" />
-                        </div>
-                        <div className={styles.debugPanel}>
-                          <div className={styles.debugRow}>
-                            <span className={styles.debugLabel}>natural</span>
-                            <span className={styles.debugValue}>
-                              {sideDebug?.naturalWidth ?? sideImage.width}×
-                              {sideDebug?.naturalHeight ?? sideImage.height}
-                            </span>
-                          </div>
-                          <div className={styles.debugRow}>
-                            <span className={styles.debugLabel}>min side</span>
-                            <span className={styles.debugValue}>
-                              {formatCount(sideDebug?.minSidePx)}
-                            </span>
-                          </div>
-                          <div className={styles.debugRow}>
-                            <span className={styles.debugLabel}>landmarks</span>
-                            <span className={styles.debugValue}>
-                              {formatCount(sideDebug?.landmarkCount)}
-                            </span>
-                          </div>
-                          <div className={styles.debugRow}>
-                            <span className={styles.debugLabel}>method</span>
-                            <span className={styles.debugValue}>
-                              {sideDebug?.method ?? "--"}
-                            </span>
-                          </div>
-                          <div className={styles.debugRow}>
-                            <span className={styles.debugLabel}>bbox found</span>
-                            <span className={styles.debugValue}>
-                              {formatBool(sideDebug?.bboxFound)}
-                            </span>
-                          </div>
-                          <div className={styles.debugRow}>
-                            <span className={styles.debugLabel}>bbox (x y w h)</span>
-                            <span className={styles.debugValue}>
-                              {formatBbox(sideDebug?.bbox)}
-                            </span>
-                          </div>
-                          <div className={styles.debugRow}>
-                            <span className={styles.debugLabel}>scale</span>
-                            <span className={styles.debugValue}>
-                              {formatNumber(sideDebug?.scaleApplied, 2)}
-                            </span>
-                          </div>
-                          <div className={styles.debugRow}>
-                            <span className={styles.debugLabel}>pose yaw</span>
-                            <span className={styles.debugValue}>
-                              {formatNumber(sideDebug?.poseYaw)}
-                            </span>
-                          </div>
-                          <div className={styles.debugRow}>
-                            <span className={styles.debugLabel}>abs yaw</span>
-                            <span className={styles.debugValue}>
-                              {formatNumber(sideDebug?.absYaw)}
-                            </span>
-                          </div>
-                          <div className={styles.debugRow}>
-                            <span className={styles.debugLabel}>pose pitch</span>
-                            <span className={styles.debugValue}>
-                              {formatNumber(sideDebug?.posePitch)}
-                            </span>
-                          </div>
-                          <div className={styles.debugRow}>
-                            <span className={styles.debugLabel}>pose roll</span>
-                            <span className={styles.debugValue}>
-                              {formatNumber(sideDebug?.poseRoll)}
-                            </span>
-                          </div>
-                          <div className={styles.debugRow}>
-                            <span className={styles.debugLabel}>detected view</span>
-                            <span className={styles.debugValue}>
-                              {sideDebug?.detectedView ?? "--"}
-                            </span>
-                          </div>
-                          <div className={styles.debugRow}>
-                            <span className={styles.debugLabel}>pose source</span>
-                            <span className={styles.debugValue}>
-                              {sideDebug?.poseSource ?? "--"}
-                            </span>
-                          </div>
-                          <div className={styles.debugRow}>
-                            <span className={styles.debugLabel}>pose selected</span>
-                            <span className={styles.debugValue}>
-                              {sideDebug?.poseSelectedLabel ?? "--"}
-                            </span>
-                          </div>
-                          <div className={styles.debugRow}>
-                            <span className={styles.debugLabel}>pose conf</span>
-                            <span className={styles.debugValue}>
-                              {formatNumber(sideDebug?.poseConfidence, 2)}
-                            </span>
-                          </div>
-                          <div className={styles.debugRow}>
-                            <span className={styles.debugLabel}>pose candidates</span>
-                            <span className={styles.debugMono}>
-                              {sideDebug?.poseCandidates ?? "--"}
-                            </span>
-                          </div>
-                          <div className={styles.debugRow}>
-                            <span className={styles.debugLabel}>pose matrix</span>
-                            <span className={styles.debugMono}>
-                              {sideDebug?.poseMatrix ?? "--"}
-                            </span>
-                          </div>
-                          <div className={styles.debugRow}>
-                            <span className={styles.debugLabel}>view valid</span>
-                            <span className={styles.debugValue}>
-                              {formatBool(sideDebug?.viewValid)}
-                            </span>
-                          </div>
-                          <div className={styles.debugRow}>
-                            <span className={styles.debugLabel}>view weight</span>
-                            <span className={styles.debugValue}>
-                              {formatNumber(sideDebug?.viewWeight, 2)}
-                            </span>
-                          </div>
-                          <div className={styles.debugRow}>
-                            <span className={styles.debugLabel}>transformed</span>
-                            <span className={styles.debugValue}>
-                              {formatBool(sideDebug?.transformed)}
-                            </span>
-                          </div>
-                          <div className={styles.debugRow}>
-                            <span className={styles.debugLabel}>blur var</span>
-                            <span className={styles.debugValue}>
-                              {formatNumber(sideDebug?.blurVariance)}
-                            </span>
-                          </div>
-                          <div className={styles.debugRow}>
-                            <span className={styles.debugLabel}>reason codes</span>
-                            <span className={styles.debugMono}>
-                              {formatReasonCodes(sideDebug?.reasonCodes)}
-                            </span>
-                          </div>
-                          <div className={styles.debugRow}>
-                            <span className={styles.debugLabel}>landmarks src</span>
-                            <span className={styles.debugMono}>
-                              {formatSource(sideDebug, "landmarks")}
-                            </span>
-                          </div>
-                          <div className={styles.debugRow}>
-                            <span className={styles.debugLabel}>evaluate src</span>
-                            <span className={styles.debugMono}>
-                              {formatSource(sideDebug, "evaluate")}
-                            </span>
-                          </div>
-                          {sideDebugLoading ? (
-                            <div className={styles.debugHint}>detecting...</div>
-                          ) : null}
-                          {sideDebug?.error ? (
-                            <div className={styles.debugError}>{sideDebug.error}</div>
-                          ) : null}
-                        </div>
-                      </>
-                    ) : null}
+                    <div className={styles.preview}>
+                      {sideImage ? (
+                        <img src={sideImage.dataUrl} alt="Side preview" />
+                      ) : (
+                        <div className={styles.previewPlaceholder}>Side photo preview</div>
+                      )}
+                    </div>
+                    <div
+                      className={`${styles.dropZone} ${
+                        activeDropZone === "side" ? styles.dropZoneActive : ""
+                      }`}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => sideInputRef.current?.click()}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          sideInputRef.current?.click();
+                        }
+                      }}
+                      onDragOver={(event) => {
+                        event.preventDefault();
+                        setActiveDropZone("side");
+                      }}
+                      onDragLeave={(event) => {
+                        if (event.currentTarget.contains(event.relatedTarget as Node)) return;
+                        setActiveDropZone((prev) => (prev === "side" ? null : prev));
+                      }}
+                      onDrop={(event) => void handleDropUpload(event, setSideImage, "side")}
+                    >
+                      <div className={styles.dropTitle}>
+                        {sideImage ? "Replace side photo" : "Drop side photo here"}
+                      </div>
+                      <div className={styles.dropHint}>or click to browse</div>
+                    </div>
                     <input
-                      className={styles.fileInput}
+                      ref={sideInputRef}
+                      className={styles.hiddenFileInput}
                       type="file"
                       accept="image/*"
                       onChange={(event) =>
-                        handleFile(event.target.files?.[0], setSideImage)
+                        void handleFile(event.target.files?.[0], setSideImage)
                       }
                     />
                   </div>
@@ -1712,6 +1282,9 @@ export default function Home() {
                 {error ? <div className={styles.error}>{error}</div> : null}
 
                 <div className={styles.actions}>
+                  <Button variant="ghost" onClick={() => setStep(1)}>
+                    Back
+                  </Button>
                   <Button
                     onClick={() => setStep(3)}
                     disabled={!canProceed}
@@ -1723,6 +1296,7 @@ export default function Home() {
                     onClick={() => {
                       setFrontImage(null);
                       setSideImage(null);
+                      setActiveDropZone(null);
                     }}
                   >
                     Reset
