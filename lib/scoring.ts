@@ -190,6 +190,7 @@ type ScoreContext = {
   frontFaceWidth: number;
   frontLowerFaceHeight: number;
   sideScale: number;
+  strictManual: boolean;
 };
 
 const defaultQuality = (expectedView: "front" | "side"): PhotoQuality => ({
@@ -436,6 +437,7 @@ const pointFromManualOrFallback = (
   const manual =
     view === "front" ? ctx.frontManualAligned.get(id) : ctx.sideManualAligned.get(id);
   if (manual) return manual;
+  if (ctx.strictManual) return null;
 
   if (fallbackIndex == null) return null;
   const source = view === "front" ? ctx.frontAligned : ctx.sideAligned;
@@ -1055,6 +1057,8 @@ const buildContext = (
     sideQuality.poseRoll
   );
 
+  const hasConfirmedManual = manualPoints.some((point) => point.confirmed);
+
   return {
     front: frontLandmarks,
     side: sideLandmarks,
@@ -1070,6 +1074,7 @@ const buildContext = (
     frontFaceWidth,
     frontLowerFaceHeight,
     sideScale,
+    strictManual: hasConfirmedManual,
   };
 };
 
