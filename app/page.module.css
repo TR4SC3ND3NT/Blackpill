@@ -113,36 +113,8 @@
   justify-content: space-between;
 }
 
-.fileInput {
-  width: 100%;
-  padding: 10px 12px;
-  border-radius: 12px;
-  border: 1px solid rgba(12, 24, 46, 0.12);
-  background: #ffffff;
-  color: rgba(15, 20, 30, 0.65);
-  font-size: 13px;
-}
-
-.fileInput::file-selector-button {
-  margin-right: 12px;
-  border: none;
-  border-radius: 999px;
-  padding: 8px 14px;
-  background: linear-gradient(90deg, #5c7dff, #8dd5ff);
-  color: #ffffff;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.fileInput::-webkit-file-upload-button {
-  margin-right: 12px;
-  border: none;
-  border-radius: 999px;
-  padding: 8px 14px;
-  background: linear-gradient(90deg, #5c7dff, #8dd5ff);
-  color: #ffffff;
-  font-weight: 600;
-  cursor: pointer;
+.hiddenFileInput {
+  display: none;
 }
 
 .preview {
@@ -160,6 +132,46 @@
   height: 100%;
   object-fit: contain;
   object-position: center;
+}
+
+.previewPlaceholder {
+  color: rgba(15, 20, 30, 0.45);
+  font-size: 13px;
+}
+
+.dropZone {
+  border: 1px dashed rgba(12, 24, 46, 0.24);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.95);
+  min-height: 74px;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  gap: 3px;
+  cursor: pointer;
+  transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
+}
+
+.dropZone:hover {
+  border-color: rgba(76, 129, 255, 0.55);
+  background: rgba(245, 249, 255, 0.98);
+}
+
+.dropZoneActive {
+  border-color: rgba(76, 129, 255, 0.85);
+  background: rgba(230, 241, 255, 0.96);
+  transform: translateY(-1px);
+}
+
+.dropTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(12, 24, 46, 0.9);
+}
+
+.dropHint {
+  font-size: 12px;
+  color: rgba(12, 24, 46, 0.56);
 }
 
 .landmarkReviewGrid {
@@ -260,48 +272,6 @@
 .choiceHint {
   font-size: 12px;
   color: rgba(15, 20, 30, 0.55);
-}
-
-.debugPanel {
-  display: grid;
-  gap: 6px;
-  font-size: 12px;
-  color: rgba(15, 20, 30, 0.6);
-}
-
-.debugRow {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.debugLabel {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  color: rgba(15, 20, 30, 0.45);
-}
-
-.debugValue {
-  font-weight: 600;
-  color: rgba(15, 20, 30, 0.85);
-  font-size: 12px;
-}
-
-.debugMono {
-  font-family: var(--font-mono), "JetBrains Mono", monospace;
-  font-size: 11px;
-  color: rgba(15, 20, 30, 0.55);
-}
-
-.debugHint {
-  font-size: 11px;
-  color: rgba(15, 20, 30, 0.5);
-}
-
-.debugError {
-  font-size: 11px;
-  color: #a03636;
 }
 
 .metaRow {
