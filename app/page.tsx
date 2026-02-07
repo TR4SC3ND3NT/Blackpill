@@ -1354,9 +1354,6 @@ export default function Home() {
                     Start Calibration
                   </Button>
                 </div>
-                {warmupStatus ? (
-                  <div className={styles.hint}>MediaPipe warmup: {warmupStatus}</div>
-                ) : null}
                 {warmupError ? <div className={styles.error}>{warmupError}</div> : null}
               </Card>
             </motion.div>
@@ -1379,12 +1376,11 @@ export default function Home() {
                   </div>
                 </div>
 
-                {previewStatus ? (
-                  <div className={styles.note}>Status: {previewStatus}</div>
-                ) : null}
                 {previewLoading ? (
                   <div className={styles.note}>
-                    Preparing auto landmarks for calibration...
+                    {previewStatus
+                      ? `Preparing auto landmarks (${previewStatus})...`
+                      : "Preparing auto landmarks for calibration..."}
                   </div>
                 ) : null}
                 {previewError ? <div className={styles.error}>{previewError}</div> : null}
