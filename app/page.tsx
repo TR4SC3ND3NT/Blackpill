@@ -1,399 +1,48 @@
 "use client";
-/* eslint-disable @next/next/no-img-element */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DragEvent as ReactDragEvent } from "react";
-import { AnimatePresence, motion } from "framer-motion";
-import imageCompression from "browser-image-compression";
+import { AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
-import Button from "@/components/Button";
-import Card from "@/components/Card";
-import LandmarkCalibrator from "@/components/LandmarkCalibrator";
 import styles from "./page.module.css";
+import HomeHeader from "@/components/page-parts/HomeHeader";
+import HomeStepper from "@/components/page-parts/HomeStepper";
+import StepTransition from "@/components/page-parts/StepTransition";
+import GenderStep from "@/components/page-parts/steps/GenderStep";
+import EthnicityStep from "@/components/page-parts/steps/EthnicityStep";
+import UploadStep from "@/components/page-parts/steps/UploadStep";
+import ConsentStep from "@/components/page-parts/steps/ConsentStep";
+import CalibrationStep from "@/components/page-parts/steps/CalibrationStep";
+import ProcessingStep from "@/components/page-parts/steps/ProcessingStep";
 import {
   detectLandmarks,
   detectLandmarksWithBBoxFallback,
   warmupMediapipe,
-  loadImageFromDataUrl,
 } from "@/lib/mediapipe";
 import { fetchJson, wait } from "@/lib/api";
+import type { Landmark, ManualLandmarkPoint, PhotoQuality } from "@/lib/types";
 import type {
-  Landmark,
-  ManualLandmarkPoint,
-  PhotoQuality,
-  PoseEstimate,
-  ReasonCode,
-} from "@/lib/types";
+  ImageState,
+  ProcessingStep as ProcessingStepType,
+  LandmarkPreviewData,
+  ManualCalibrationResult,
+  StepItem,
+} from "@/lib/page-flow/types";
+import { compressImage } from "@/lib/page-flow/image-utils";
+import { evaluatePhoto, PREVIEW_STAGE_TIMEOUT_MS } from "@/lib/page-flow/photo-evaluation";
+import {
+  mergeIssues,
+  isAbortError,
+  withAbortAndTimeout,
+} from "@/lib/page-flow/async-utils";
 
-type ImageState = {
-  dataUrl: string;
-  width: number;
-  height: number;
-};
-
-type ProcessingStep = {
-  key: string;
-  label: string;
-  status: "pending" | "running" | "done" | "error";
-  note?: string;
-};
-
-type ExpectedView = "front" | "side";
-
-type LandmarkPreviewData = {
-  frontLandmarks: Landmark[];
-  sideLandmarks: Landmark[];
-  frontQuality: PhotoQuality;
-  sideQuality: PhotoQuality;
-  frontMethod: string;
-  frontTransformed: boolean;
-  frontPose: PoseEstimate;
-  sideMethod: string;
-  sideTransformed: boolean;
-  sidePose: PoseEstimate;
-  sideBboxFound: boolean;
-  sideBbox?: { x: number; y: number; width: number; height: number };
-  sideScaleApplied: number;
-  warnings: string[];
-  sideWarning?: string;
-};
-
-type ManualCalibrationResult = {
-  manualPoints: ManualLandmarkPoint[];
-};
-
-const initialProcessing: ProcessingStep[] = [
+const initialProcessing: ProcessingStepType[] = [
   { key: "landmarks", label: "Detecting landmarks", status: "pending" },
   { key: "orientation", label: "Estimating side orientation", status: "pending" },
   { key: "background", label: "Refining background", status: "pending" },
   { key: "analysis", label: "Creating analysis", status: "pending" },
   { key: "save", label: "Saving landmark package", status: "pending" },
 ];
-
-const compressImage = async (file: File) => {
-  const compressed = await imageCompression(file, {
-    maxWidthOrHeight: 1024,
-    initialQuality: 0.82,
-    useWebWorker: true,
-  });
-  const dataUrl = await imageCompression.getDataUrlFromFile(compressed);
-  const image = await loadImageFromDataUrl(dataUrl);
-  return { dataUrl, width: image.width, height: image.height };
-};
-
-const clamp = (value: number, min: number, max: number) =>
-  Math.max(min, Math.min(max, value));
-
-const smoothstep = (edge0: number, edge1: number, x: number) => {
-  if (edge1 <= edge0) return x >= edge1 ? 1 : 0;
-  const t = clamp((x - edge0) / (edge1 - edge0), 0, 1);
-  return t * t * (3 - 2 * t);
-};
-
-const normalizeLandmarksForImage = (
-  points: Landmark[],
-  width: number,
-  height: number
-) => {
-  if (!points.length) return [];
-  const maxX = Math.max(...points.map((pt) => pt.x));
-  const maxY = Math.max(...points.map((pt) => pt.y));
-  const normalized = maxX <= 2 && maxY <= 2;
-  if (normalized) {
-    return points.map((pt) => ({ x: pt.x, y: pt.y, z: pt.z ?? 0 }));
-  }
-  const safeW = Math.max(1, width);
-  const safeH = Math.max(1, height);
-  return points.map((pt) => ({
-    x: pt.x / safeW,
-    y: pt.y / safeH,
-    z: pt.z ?? 0,
-  }));
-};
-
-const computeBlurVariance = async (dataUrl: string) => {
-  const image = await loadImageFromDataUrl(dataUrl);
-  const maxSide = Math.max(image.width, image.height);
-  const scale = maxSide > 256 ? 256 / maxSide : 1;
-  const width = Math.max(1, Math.round(image.width * scale));
-  const height = Math.max(1, Math.round(image.height * scale));
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return 0;
-  ctx.drawImage(image, 0, 0, width, height);
-  const { data } = ctx.getImageData(0, 0, width, height);
-  const gray = new Float32Array(width * height);
-  for (let i = 0; i < width * height; i += 1) {
-    const idx = i * 4;
-    gray[i] = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
-  }
-  let sum = 0;
-  let sumSq = 0;
-  let count = 0;
-  for (let y = 1; y < height - 1; y += 1) {
-    for (let x = 1; x < width - 1; x += 1) {
-      const idx = y * width + x;
-      const lap =
-        gray[idx - width] +
-        gray[idx + width] +
-        gray[idx - 1] +
-        gray[idx + 1] -
-        4 * gray[idx];
-      sum += lap;
-      sumSq += lap * lap;
-      count += 1;
-    }
-  }
-  if (!count) return 0;
-  const mean = sum / count;
-  return sumSq / count - mean * mean;
-};
-
-const MIN_SIDE_PX = 600;
-const BLUR_THRESHOLD = 40;
-const PREVIEW_STAGE_TIMEOUT_MS = 20_000;
-const DEFAULT_POSE: PoseEstimate = {
-  yaw: 0,
-  pitch: 0,
-  roll: 0,
-  source: "none",
-  matrix: null,
-  confidence: 0,
-  view: "unknown",
-  validFront: false,
-  validSide: false,
-};
-
-const evaluatePhoto = async (
-  label: string,
-  dataUrl: string,
-  landmarks: Landmark[],
-  width: number,
-  height: number,
-  expectedView: ExpectedView,
-  poseInput?: PoseEstimate,
-  transformed = false
-): Promise<{ ok: boolean; errors: string[]; warnings: string[]; quality: PhotoQuality }> => {
-  const errors: string[] = [];
-  const warnings: string[] = [];
-  const reasonCodes = new Set<ReasonCode>();
-  const hasLandmarks = landmarks.length > 0;
-  const pose = poseInput ?? DEFAULT_POSE;
-  const normalized = normalizeLandmarksForImage(landmarks, width, height);
-  const valid = normalized.filter(
-    (pt) =>
-      Number.isFinite(pt.x) &&
-      Number.isFinite(pt.y) &&
-      pt.x >= 0 &&
-      pt.x <= 1 &&
-      pt.y >= 0 &&
-      pt.y <= 1
-  );
-
-  if (!hasLandmarks) {
-    errors.push(`${label} photo: face not detected.`);
-    reasonCodes.add("low_landmark_conf");
-  }
-
-  const minSidePx = Math.min(width, height);
-  if (minSidePx < MIN_SIDE_PX) {
-    warnings.push(`${label} photo is too small (min ${MIN_SIDE_PX}px).`);
-    reasonCodes.add("low_landmark_conf");
-  }
-
-  let faceInFrame = false;
-  if (normalized.length) {
-    const xs = normalized.map((pt) => pt.x);
-    const ys = normalized.map((pt) => pt.y);
-    const minX = Math.min(...xs);
-    const maxX = Math.max(...xs);
-    const minY = Math.min(...ys);
-    const maxY = Math.max(...ys);
-    const margin = 0.04;
-    faceInFrame =
-      minX > margin && maxX < 1 - margin && minY > margin && maxY < 1 - margin;
-    if (!faceInFrame) {
-      warnings.push(`${label} photo is not a full face (cropped).`);
-      reasonCodes.add("out_of_frame");
-    }
-  }
-
-  let blurVariance = 0;
-  try {
-    blurVariance = await computeBlurVariance(dataUrl);
-  } catch {
-    blurVariance = 0;
-  }
-  if (blurVariance < BLUR_THRESHOLD) {
-    warnings.push(`${label} photo is too blurry.`);
-    reasonCodes.add("blur");
-  }
-
-  const absYaw = Math.abs(pose.yaw);
-  const absPitch = Math.abs(pose.pitch);
-  const absRoll = Math.abs(pose.roll);
-  const detectedView: PhotoQuality["detectedView"] =
-    absYaw <= 15 ? "front" : absYaw < 60 ? "three_quarter" : "side";
-  const viewValid = expectedView === "front" ? pose.validFront : absYaw >= 25;
-  let viewWeight = expectedView === "side" ? smoothstep(25, 65, absYaw) : 1;
-
-  if (hasLandmarks && !viewValid) {
-    reasonCodes.add("bad_pose");
-    if (expectedView === "side") {
-      reasonCodes.add("not_enough_yaw");
-      reasonCodes.add("side_disabled");
-      viewWeight = 0;
-    }
-    if (expectedView === "front") {
-      warnings.push("Front photo is not a frontal view.");
-    } else {
-      warnings.push("Side angle is too frontal for profile metrics.");
-    }
-  }
-
-  if (expectedView === "side" && hasLandmarks && absYaw >= 25 && absYaw < 60) {
-    reasonCodes.add("side_ok_three_quarter");
-  }
-
-  if (hasLandmarks && expectedView === "side" && absPitch > 20) {
-    reasonCodes.add("excessive_pitch");
-    warnings.push("Side pitch is high; profile confidence reduced.");
-  }
-
-  if (hasLandmarks && absRoll > 30) {
-    reasonCodes.add("excessive_roll");
-    warnings.push("Head is tilted; metrics are roll-corrected.");
-  }
-
-  if (hasLandmarks) {
-    if (expectedView === "side") {
-      const validRatio = normalized.length ? valid.length / normalized.length : 0;
-      if (landmarks.length < 200 || validRatio < 0.7) {
-        warnings.push("Profile angle/visibility insufficient.");
-        reasonCodes.add("occlusion");
-      }
-      if (validRatio < 0.8) {
-        reasonCodes.add("low_landmark_conf");
-      }
-    }
-  }
-
-  if (transformed) {
-    reasonCodes.add("transformed_detection");
-  }
-
-  const validRatio = normalized.length ? valid.length / normalized.length : 0;
-  if (hasLandmarks && validRatio < 0.75) {
-    reasonCodes.add("low_landmark_conf");
-  }
-
-  let confidence = hasLandmarks
-    ? clamp(
-        expectedView === "side" ? 0.55 + (pose.confidence || 0) * 0.35 : 0.6 + (pose.confidence || 0) * 0.4,
-        0,
-        1
-      )
-    : 0;
-  if (expectedView === "side") {
-    confidence *= 0.45 + viewWeight * 0.55;
-    if (absPitch > 20) confidence *= clamp(1 - (absPitch - 20) / 28, 0.45, 1);
-  }
-  if (!viewValid) confidence *= 0.72;
-  if (!faceInFrame) confidence *= 0.8;
-  if (blurVariance < BLUR_THRESHOLD) confidence *= 0.78;
-  if (minSidePx < MIN_SIDE_PX) confidence *= 0.82;
-  if (transformed) confidence *= 0.72;
-  if (validRatio > 0 && validRatio < 0.8) confidence *= 0.82;
-  confidence = clamp(confidence, 0, 1);
-
-  const qualityLevel = errors.length || warnings.length ? "low" : "ok";
-
-  return {
-    ok: errors.length === 0,
-    errors,
-    warnings,
-    quality: {
-      poseYaw: pose.yaw,
-      posePitch: pose.pitch,
-      poseRoll: pose.roll,
-      detectedView,
-      faceInFrame,
-      minSidePx,
-      blurVariance,
-      landmarkCount: landmarks.length,
-      quality: qualityLevel,
-      confidence,
-      pose,
-      expectedView,
-      viewValid,
-      viewWeight,
-      reasonCodes: Array.from(reasonCodes),
-      issues: [...errors, ...warnings],
-    },
-  };
-};
-
-const mergeIssues = (items: string[]) => Array.from(new Set(items.filter(Boolean)));
-
-const isAbortError = (error: unknown) =>
-  error instanceof Error && error.name === "AbortError";
-
-const withTimeout = async <T,>(
-  promise: Promise<T>,
-  timeoutMs: number,
-  label: string
-) =>
-  new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      reject(new Error(`${label} exceeded ${timeoutMs / 1000}s timeout.`));
-    }, timeoutMs);
-    promise.then(
-      (value) => {
-        clearTimeout(timer);
-        resolve(value);
-      },
-      (error) => {
-        clearTimeout(timer);
-        reject(error);
-      }
-    );
-  });
-
-const withAbort = async <T,>(promise: Promise<T>, signal?: AbortSignal) => {
-  if (!signal) return promise;
-  if (signal.aborted) {
-    const error = new Error("Operation aborted.");
-    error.name = "AbortError";
-    throw error;
-  }
-  return new Promise<T>((resolve, reject) => {
-    const onAbort = () => {
-      const error = new Error("Operation aborted.");
-      error.name = "AbortError";
-      reject(error);
-    };
-    signal.addEventListener("abort", onAbort, { once: true });
-    promise.then(
-      (value) => {
-        signal.removeEventListener("abort", onAbort);
-        resolve(value);
-      },
-      (error) => {
-        signal.removeEventListener("abort", onAbort);
-        reject(error);
-      }
-    );
-  });
-};
-
-const withAbortAndTimeout = async <T,>(
-  promise: Promise<T>,
-  signal: AbortSignal | undefined,
-  timeoutMs: number,
-  label: string
-) => withAbort(withTimeout(promise, timeoutMs, label), signal);
 
 export default function Home() {
   const router = useRouter();
@@ -406,7 +55,7 @@ export default function Home() {
   const [consent, setConsent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [processingSteps, setProcessingSteps] =
-    useState<ProcessingStep[]>(initialProcessing);
+    useState<ProcessingStepType[]>(initialProcessing);
   const [isProcessing, setIsProcessing] = useState(false);
   const [previewData, setPreviewData] = useState<LandmarkPreviewData | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -422,7 +71,7 @@ export default function Home() {
   const previewRequestKeyRef = useRef<string | null>(null);
   const warmupTriggeredRef = useRef(false);
 
-  const stepItems = useMemo(
+  const stepItems = useMemo<StepItem[]>(
     () => [
       {
         label: "Gender",
@@ -465,7 +114,7 @@ export default function Home() {
   }, [processingSteps]);
 
   const updateProcessing = useCallback(
-    (key: string, status: ProcessingStep["status"], note?: string) => {
+    (key: string, status: ProcessingStepType["status"], note?: string) => {
       setProcessingSteps((prev) =>
         prev.map((item) =>
           item.key === key ? { ...item, status, note: note ?? item.note } : item
@@ -569,122 +218,123 @@ export default function Home() {
     };
   }, [frontImage, sideImage, consent, step]);
 
-  const prepareLandmarkPreview = useCallback(async (
-    signal?: AbortSignal
-  ): Promise<LandmarkPreviewData> => {
-    if (!frontImage || !sideImage) {
-      throw new Error("Please upload both photos.");
-    }
+  const prepareLandmarkPreview = useCallback(
+    async (signal?: AbortSignal): Promise<LandmarkPreviewData> => {
+      if (!frontImage || !sideImage) {
+        throw new Error("Please upload both photos.");
+      }
 
-    const stageTimeout = PREVIEW_STAGE_TIMEOUT_MS;
-    setPreviewStatus("Loading WASM...");
-    await withAbortAndTimeout(
-      warmupMediapipe({
-        timeoutMs: stageTimeout,
+      const stageTimeout = PREVIEW_STAGE_TIMEOUT_MS;
+      setPreviewStatus("Loading WASM...");
+      await withAbortAndTimeout(
+        warmupMediapipe({
+          timeoutMs: stageTimeout,
+          signal,
+          onStatus: (status) => setPreviewStatus(status),
+        }),
         signal,
-        onStatus: (status) => setPreviewStatus(status),
-      }),
-      signal,
-      stageTimeout,
-      "Preview warmup"
-    );
+        stageTimeout,
+        "Preview warmup"
+      );
 
-    setPreviewStatus("Running landmarker...");
-    const [frontDetection, sideDetection] = await withAbortAndTimeout(
-      Promise.all([
-        detectLandmarks(frontImage.dataUrl, {
-          signal,
-          timeoutMs: stageTimeout,
-          expectedView: "front",
-          onStatus: (status) => setPreviewStatus(status),
-        }),
-        detectLandmarksWithBBoxFallback(sideImage.dataUrl, {
-          signal,
-          timeoutMs: stageTimeout,
-          expectedView: "side",
-          onStatus: (status) => setPreviewStatus(status),
-        }),
-      ]),
-      signal,
-      stageTimeout,
-      "Landmark detection"
-    );
-    const front = frontDetection.landmarks;
-    const side = sideDetection.landmarks;
+      setPreviewStatus("Running landmarker...");
+      const [frontDetection, sideDetection] = await withAbortAndTimeout(
+        Promise.all([
+          detectLandmarks(frontImage.dataUrl, {
+            signal,
+            timeoutMs: stageTimeout,
+            expectedView: "front",
+            onStatus: (status) => setPreviewStatus(status),
+          }),
+          detectLandmarksWithBBoxFallback(sideImage.dataUrl, {
+            signal,
+            timeoutMs: stageTimeout,
+            expectedView: "side",
+            onStatus: (status) => setPreviewStatus(status),
+          }),
+        ]),
+        signal,
+        stageTimeout,
+        "Landmark detection"
+      );
+      const front = frontDetection.landmarks;
+      const side = sideDetection.landmarks;
 
-    setPreviewStatus("Evaluating quality...");
-    const [frontCheck, sideCheck] = await Promise.all([
-      evaluatePhoto(
-        "Front",
-        frontImage.dataUrl,
-        front,
-        frontImage.width,
-        frontImage.height,
-        "front",
-        frontDetection.pose,
-        frontDetection.transformed
-      ),
-      evaluatePhoto(
-        "Side",
-        sideImage.dataUrl,
-        side,
-        sideImage.width,
-        sideImage.height,
-        "side",
-        sideDetection.pose,
-        sideDetection.transformed
-      ),
-    ]);
+      setPreviewStatus("Evaluating quality...");
+      const [frontCheck, sideCheck] = await Promise.all([
+        evaluatePhoto(
+          "Front",
+          frontImage.dataUrl,
+          front,
+          frontImage.width,
+          frontImage.height,
+          "front",
+          frontDetection.pose,
+          frontDetection.transformed
+        ),
+        evaluatePhoto(
+          "Side",
+          sideImage.dataUrl,
+          side,
+          sideImage.width,
+          sideImage.height,
+          "side",
+          sideDetection.pose,
+          sideDetection.transformed
+        ),
+      ]);
 
-    if (!frontCheck.ok) {
-      throw new Error(frontCheck.errors.join(" "));
-    }
+      if (!frontCheck.ok) {
+        throw new Error(frontCheck.errors.join(" "));
+      }
 
-    let sideQuality: PhotoQuality = sideCheck.quality;
-    const warnings: string[] = [...frontCheck.warnings, ...sideCheck.warnings];
-    let sideWarning: string | undefined;
+      let sideQuality: PhotoQuality = sideCheck.quality;
+      const warnings: string[] = [...frontCheck.warnings, ...sideCheck.warnings];
+      let sideWarning: string | undefined;
 
-    if (!side.length) {
-      sideWarning = "Side face not detected - try another angle.";
-      sideQuality = {
-        ...sideQuality,
-        quality: "low",
-        issues: mergeIssues([...sideQuality.issues, sideWarning]),
+      if (!side.length) {
+        sideWarning = "Side face not detected - try another angle.";
+        sideQuality = {
+          ...sideQuality,
+          quality: "low",
+          issues: mergeIssues([...sideQuality.issues, sideWarning]),
+        };
+      } else if (sideCheck.quality.reasonCodes.includes("side_disabled")) {
+        sideWarning = "Side pose invalid - profile metrics disabled.";
+        sideQuality = {
+          ...sideQuality,
+          quality: "low",
+          issues: mergeIssues([...sideQuality.issues, sideWarning]),
+        };
+      } else if (!sideCheck.ok) {
+        sideQuality = {
+          ...sideQuality,
+          quality: "low",
+          issues: mergeIssues([...sideQuality.issues, ...sideCheck.errors]),
+        };
+        warnings.push(...sideCheck.errors);
+      }
+
+      return {
+        frontLandmarks: front,
+        sideLandmarks: side,
+        frontQuality: frontCheck.quality,
+        sideQuality,
+        frontMethod: frontDetection.method,
+        frontTransformed: frontDetection.transformed,
+        frontPose: frontDetection.pose,
+        sideMethod: sideDetection.method,
+        sideTransformed: sideDetection.transformed,
+        sidePose: sideDetection.pose,
+        sideBboxFound: sideDetection.bboxFound,
+        sideBbox: sideDetection.bbox,
+        sideScaleApplied: sideDetection.scaleApplied,
+        warnings: mergeIssues(warnings),
+        sideWarning,
       };
-    } else if (sideCheck.quality.reasonCodes.includes("side_disabled")) {
-      sideWarning = "Side pose invalid - profile metrics disabled.";
-      sideQuality = {
-        ...sideQuality,
-        quality: "low",
-        issues: mergeIssues([...sideQuality.issues, sideWarning]),
-      };
-    } else if (!sideCheck.ok) {
-      sideQuality = {
-        ...sideQuality,
-        quality: "low",
-        issues: mergeIssues([...sideQuality.issues, ...sideCheck.errors]),
-      };
-      warnings.push(...sideCheck.errors);
-    }
-
-    return {
-      frontLandmarks: front,
-      sideLandmarks: side,
-      frontQuality: frontCheck.quality,
-      sideQuality,
-      frontMethod: frontDetection.method,
-      frontTransformed: frontDetection.transformed,
-      frontPose: frontDetection.pose,
-      sideMethod: sideDetection.method,
-      sideTransformed: sideDetection.transformed,
-      sidePose: sideDetection.pose,
-      sideBboxFound: sideDetection.bboxFound,
-      sideBbox: sideDetection.bbox,
-      sideScaleApplied: sideDetection.scaleApplied,
-      warnings: mergeIssues(warnings),
-      sideWarning,
-    };
-  }, [frontImage, sideImage]);
+    },
+    [frontImage, sideImage]
+  );
 
   useEffect(() => {
     if (step !== 4 || !frontImage || !sideImage) {
@@ -1019,471 +669,144 @@ export default function Home() {
   return (
     <main className={styles.homeShell}>
       <div className={styles.homeContainer}>
-        <div className={styles.header}>
-          <div className={styles.title}>Blackpill</div>
-          <div className={styles.subtitle}>
-            Upload front and side photos, review consent, then we run a quick landmark
-            analysis to generate structured scores and assessments.
-          </div>
-        </div>
-
-        <div className={styles.homeStepper}>
-          {stepItems.map((item) => (
-            <div
-              key={item.label}
-              className={`${styles.homeStep} ${
-                item.status === "active"
-                  ? styles.homeStepActive
-                  : item.status === "done"
-                    ? styles.homeStepDone
-                    : ""
-              }`}
-            >
-              <span className={styles.homeStepDot} />
-              <span>{item.label}</span>
-            </div>
-          ))}
-        </div>
+        <HomeHeader />
+        <HomeStepper items={stepItems} />
 
         <AnimatePresence mode="wait">
           {step === 0 ? (
-            <motion.div
-              key="gender"
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -12 }}
-              transition={{ duration: 0.35 }}
-            >
-              <Card className={`${styles.homeCard} ${styles.grid}`}>
-                <div>
-                  <strong>Select your gender</strong>
-                  <div className={styles.note}>
-                    This helps us calibrate symmetry and ratio benchmarks.
-                  </div>
-                </div>
-                <div className={styles.choiceGrid}>
-                  {[
-                    { value: "male", label: "Male" },
-                    { value: "female", label: "Female" },
-                  ].map((option) => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      className={`${styles.choiceButton} ${
-                        gender === option.value ? styles.choiceButtonActive : ""
-                      }`}
-                      onClick={() => {
-                        setGender(option.value);
-                        setError(null);
-                      }}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
-                {error ? <div className={styles.error}>{error}</div> : null}
-                <div className={styles.actions}>
-                  <Button
-                    onClick={() => {
-                      if (!gender) {
-                        setError("Please select a gender to continue.");
-                        return;
-                      }
-                      setError(null);
-                      setStep(1);
-                    }}
-                  >
-                    Continue
-                  </Button>
-                </div>
-              </Card>
-            </motion.div>
+            <StepTransition stepKey="gender">
+              <GenderStep
+                gender={gender}
+                error={error}
+                onSelectGender={(value) => {
+                  setGender(value);
+                  setError(null);
+                }}
+                onContinue={() => {
+                  if (!gender) {
+                    setError("Please select a gender to continue.");
+                    return;
+                  }
+                  setError(null);
+                  setStep(1);
+                }}
+              />
+            </StepTransition>
           ) : null}
 
           {step === 1 ? (
-            <motion.div
-              key="ethnicity"
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -12 }}
-              transition={{ duration: 0.35 }}
-            >
-              <Card className={`${styles.homeCard} ${styles.grid}`}>
-                <div>
-                  <strong>Select your ethnicity</strong>
-                  <div className={styles.note}>
-                    Choose the closest match to align feature comparisons.
-                  </div>
-                </div>
-                <div className={styles.choiceGrid}>
-                  {[
-                    { value: "asian", label: "Asian" },
-                    { value: "black", label: "Black / African" },
-                    { value: "latino", label: "Hispanic / Latino" },
-                    { value: "middle-eastern", label: "Middle Eastern" },
-                    { value: "white", label: "White / Caucasian" },
-                  ].map((option) => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      className={`${styles.choiceButton} ${
-                        race === option.value ? styles.choiceButtonActive : ""
-                      }`}
-                      onClick={() => {
-                        setRace(option.value);
-                        setError(null);
-                      }}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
-                {error ? <div className={styles.error}>{error}</div> : null}
-                <div className={styles.actions}>
-                  <Button variant="ghost" onClick={() => setStep(0)}>
-                    Back
-                  </Button>
-                  <Button
-                    onClick={() => {
-                      if (!race) {
-                        setError("Please select an ethnicity to continue.");
-                        return;
-                      }
-                      setError(null);
-                      setStep(2);
-                    }}
-                  >
-                    Continue
-                  </Button>
-                </div>
-              </Card>
-            </motion.div>
+            <StepTransition stepKey="ethnicity">
+              <EthnicityStep
+                race={race}
+                error={error}
+                onSelectRace={(value) => {
+                  setRace(value);
+                  setError(null);
+                }}
+                onBack={() => setStep(0)}
+                onContinue={() => {
+                  if (!race) {
+                    setError("Please select an ethnicity to continue.");
+                    return;
+                  }
+                  setError(null);
+                  setStep(2);
+                }}
+              />
+            </StepTransition>
           ) : null}
 
           {step === 2 ? (
-            <motion.div
-              key="upload"
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -12 }}
-              transition={{ duration: 0.35 }}
-            >
-              <Card className={`${styles.homeCard} ${styles.grid}`}>
-                <div className={styles.uploadGrid}>
-                  <div className={styles.uploadCard}>
-                    <div>
-                      <strong>Front Photo</strong>
-                      <div className={styles.note}>
-                        Straight-on, eyes open, even lighting.
-                      </div>
-                    </div>
-                    <div className={styles.preview}>
-                      {frontImage ? (
-                        <img src={frontImage.dataUrl} alt="Front preview" />
-                      ) : (
-                        <div className={styles.previewPlaceholder}>Front photo preview</div>
-                      )}
-                    </div>
-                    <div
-                      className={`${styles.dropZone} ${
-                        activeDropZone === "front" ? styles.dropZoneActive : ""
-                      }`}
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => frontInputRef.current?.click()}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter" || event.key === " ") {
-                          event.preventDefault();
-                          frontInputRef.current?.click();
-                        }
-                      }}
-                      onDragOver={(event) => {
-                        event.preventDefault();
-                        setActiveDropZone("front");
-                      }}
-                      onDragLeave={(event) => {
-                        if (event.currentTarget.contains(event.relatedTarget as Node)) return;
-                        setActiveDropZone((prev) => (prev === "front" ? null : prev));
-                      }}
-                      onDrop={(event) => void handleDropUpload(event, setFrontImage, "front")}
-                    >
-                      <div className={styles.dropTitle}>
-                        {frontImage ? "Replace front photo" : "Drop front photo here"}
-                      </div>
-                      <div className={styles.dropHint}>or click to browse</div>
-                    </div>
-                    <input
-                      ref={frontInputRef}
-                      className={styles.hiddenFileInput}
-                      type="file"
-                      accept="image/*"
-                      onChange={(event) => {
-                        void handleFile(event.target.files?.[0], setFrontImage);
-                        event.currentTarget.value = "";
-                      }}
-                    />
-                  </div>
-
-                  <div className={styles.uploadCard}>
-                    <div>
-                      <strong>Side Photo</strong>
-                      <div className={styles.note}>Clear profile, chin neutral.</div>
-                    </div>
-                    <div className={styles.preview}>
-                      {sideImage ? (
-                        <img src={sideImage.dataUrl} alt="Side preview" />
-                      ) : (
-                        <div className={styles.previewPlaceholder}>Side photo preview</div>
-                      )}
-                    </div>
-                    <div
-                      className={`${styles.dropZone} ${
-                        activeDropZone === "side" ? styles.dropZoneActive : ""
-                      }`}
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => sideInputRef.current?.click()}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter" || event.key === " ") {
-                          event.preventDefault();
-                          sideInputRef.current?.click();
-                        }
-                      }}
-                      onDragOver={(event) => {
-                        event.preventDefault();
-                        setActiveDropZone("side");
-                      }}
-                      onDragLeave={(event) => {
-                        if (event.currentTarget.contains(event.relatedTarget as Node)) return;
-                        setActiveDropZone((prev) => (prev === "side" ? null : prev));
-                      }}
-                      onDrop={(event) => void handleDropUpload(event, setSideImage, "side")}
-                    >
-                      <div className={styles.dropTitle}>
-                        {sideImage ? "Replace side photo" : "Drop side photo here"}
-                      </div>
-                      <div className={styles.dropHint}>or click to browse</div>
-                    </div>
-                    <input
-                      ref={sideInputRef}
-                      className={styles.hiddenFileInput}
-                      type="file"
-                      accept="image/*"
-                      onChange={(event) => {
-                        void handleFile(event.target.files?.[0], setSideImage);
-                        event.currentTarget.value = "";
-                      }}
-                    />
-                  </div>
-                </div>
-
-                {error ? <div className={styles.error}>{error}</div> : null}
-
-                <div className={styles.actions}>
-                  <Button variant="ghost" onClick={() => setStep(1)}>
-                    Back
-                  </Button>
-                  <Button
-                    onClick={() => setStep(3)}
-                    disabled={!canProceed}
-                  >
-                    Continue to Consent
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    onClick={() => {
-                      setFrontImage(null);
-                      setSideImage(null);
-                      setActiveDropZone(null);
-                    }}
-                  >
-                    Reset
-                  </Button>
-                </div>
-              </Card>
-            </motion.div>
+            <StepTransition stepKey="upload">
+              <UploadStep
+                frontImage={frontImage}
+                sideImage={sideImage}
+                activeDropZone={activeDropZone}
+                frontInputRef={frontInputRef}
+                sideInputRef={sideInputRef}
+                error={error}
+                canProceed={Boolean(canProceed)}
+                setActiveDropZone={setActiveDropZone}
+                onFrontFileChange={(file) => void handleFile(file, setFrontImage)}
+                onSideFileChange={(file) => void handleFile(file, setSideImage)}
+                onFrontDrop={(event) => void handleDropUpload(event, setFrontImage, "front")}
+                onSideDrop={(event) => void handleDropUpload(event, setSideImage, "side")}
+                onBack={() => setStep(1)}
+                onContinue={() => setStep(3)}
+                onReset={() => {
+                  setFrontImage(null);
+                  setSideImage(null);
+                  setActiveDropZone(null);
+                }}
+              />
+            </StepTransition>
           ) : null}
 
           {step === 3 ? (
-            <motion.div
-              key="consent"
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -12 }}
-              transition={{ duration: 0.35 }}
-            >
-              <Card className={`${styles.homeCard} ${styles.grid}`}>
-                <div className={styles.consentBox}>
-                  <input
-                    type="checkbox"
-                    checked={consent}
-                    onChange={(event) => setConsent(event.target.checked)}
-                  />
-                  <div>
-                    <strong>I consent to processing</strong>
-                    <div className={styles.note}>
-                      Photos are used only to generate your analysis session and are
-                      stored locally in this MVP. You can reset at any time.
-                    </div>
-                  </div>
-                </div>
-
-                {error ? <div className={styles.error}>{error}</div> : null}
-
-                <div className={styles.actions}>
-                  <Button variant="ghost" onClick={() => setStep(2)}>
-                    Back
-                  </Button>
-                  <Button
-                    onClick={() => {
-                      if (!consent) {
-                        setError("Please confirm consent to continue.");
-                        return;
-                      }
-                      setPreviewError(null);
-                      setPreviewData(null);
-                      setPreviewStatus(null);
-                      setManualCalibration(null);
-                      previewRequestKeyRef.current = null;
-                      setError(null);
-                      setStep(4);
-                    }}
-                  >
-                    Start Calibration
-                  </Button>
-                </div>
-                {warmupError ? <div className={styles.error}>{warmupError}</div> : null}
-              </Card>
-            </motion.div>
+            <StepTransition stepKey="consent">
+              <ConsentStep
+                consent={consent}
+                error={error}
+                warmupError={warmupError}
+                onConsentChange={setConsent}
+                onBack={() => setStep(2)}
+                onStartCalibration={() => {
+                  if (!consent) {
+                    setError("Please confirm consent to continue.");
+                    return;
+                  }
+                  setPreviewError(null);
+                  setPreviewData(null);
+                  setPreviewStatus(null);
+                  setManualCalibration(null);
+                  previewRequestKeyRef.current = null;
+                  setError(null);
+                  setStep(4);
+                }}
+              />
+            </StepTransition>
           ) : null}
 
           {step === 4 ? (
-            <motion.div
-              key="landmark-calibration"
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -12 }}
-              transition={{ duration: 0.35 }}
-            >
-              <Card className={`${styles.homeCard} ${styles.grid}`}>
-                <div>
-                  <strong>Landmark Calibration</strong>
-                  <div className={styles.note}>
-                    Calibration runs in two passes: FRONT landmarks first, then SIDE/profile
-                    landmarks. Each step shows one active point only.
-                  </div>
-                </div>
-
-                {previewLoading ? (
-                  <div className={styles.note}>
-                    {previewStatus
-                      ? `Preparing auto landmarks (${previewStatus})...`
-                      : "Preparing auto landmarks for calibration..."}
-                  </div>
-                ) : null}
-                {previewError ? <div className={styles.error}>{previewError}</div> : null}
-
-                {error ? <div className={styles.error}>{error}</div> : null}
-
-                {previewData && frontImage && sideImage ? (
-                  <LandmarkCalibrator
-                    frontImage={frontImage}
-                    sideImage={sideImage}
-                    frontLandmarks={previewData.frontLandmarks}
-                    sideLandmarks={previewData.sideLandmarks}
-                    frontQuality={previewData.frontQuality}
-                    sideQuality={previewData.sideQuality}
-                    profile={{ gender: gender || "male", ethnicity: race || "white" }}
-                    initialPoints={manualCalibration?.manualPoints ?? null}
-                    onBack={() => setStep(3)}
-                    onComplete={(result) => {
-                      setManualCalibration(result);
-                      setError(null);
-                      setStep(5);
-                    }}
-                  />
-                ) : (
-                  <div className={styles.actions}>
-                    <Button variant="ghost" onClick={() => setStep(3)}>
-                      Back
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      onClick={() => {
-                        setPreviewError(null);
-                        setPreviewData(null);
-                        setPreviewStatus(null);
-                        setManualCalibration(null);
-                        previewRequestKeyRef.current = null;
-                      }}
-                    >
-                      Retry Preparation
-                    </Button>
-                  </div>
-                )}
-              </Card>
-            </motion.div>
+            <StepTransition stepKey="landmark-calibration">
+              <CalibrationStep
+                frontImage={frontImage}
+                sideImage={sideImage}
+                previewData={previewData}
+                previewLoading={previewLoading}
+                previewStatus={previewStatus}
+                previewError={previewError}
+                error={error}
+                gender={gender}
+                race={race}
+                manualCalibration={manualCalibration}
+                onBackToConsent={() => setStep(3)}
+                onRetryPreparation={() => {
+                  setPreviewError(null);
+                  setPreviewData(null);
+                  setPreviewStatus(null);
+                  setManualCalibration(null);
+                  previewRequestKeyRef.current = null;
+                }}
+                onComplete={(result) => {
+                  setManualCalibration(result);
+                  setError(null);
+                  setStep(5);
+                }}
+              />
+            </StepTransition>
           ) : null}
 
           {step === 5 ? (
-            <motion.div
-              key="processing"
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -12 }}
-              transition={{ duration: 0.35 }}
-            >
-              <Card className={`${styles.homeCard} ${styles.progressWrap}`}>
-                <div>
-                  <strong>Processing</strong>
-                  <div className={styles.note}>
-                    We are running on-device landmarking and preparing your analysis.
-                  </div>
-                </div>
-                <div className={styles.progressTrack}>
-                  <div
-                    className={styles.progressFill}
-                    style={{ width: `${progressPercent}%` }}
-                  >
-                    <div className={styles.shimmer} />
-                  </div>
-                </div>
-
-                <div className={styles.statusList}>
-                  {processingSteps.map((item) => (
-                    <div key={item.key} className={styles.statusItem}>
-                      <span
-                        className={`${styles.statusDot} ${
-                          item.status === "running"
-                            ? styles.statusRunning
-                            : item.status === "done"
-                              ? styles.statusDone
-                              : item.status === "error"
-                                ? styles.statusError
-                                : ""
-                        }`}
-                      />
-                      <span>{item.label}</span>
-                      {item.note ? (
-                        <span className={styles.hint}>({item.note})</span>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-
-                {error ? <div className={styles.error}>{error}</div> : null}
-
-                <div className={styles.actions}>
-                  <Button
-                    variant="ghost"
-                    onClick={() => setStep(4)}
-                    disabled={isProcessing}
-                  >
-                    Back
-                  </Button>
-                </div>
-              </Card>
-            </motion.div>
+            <StepTransition stepKey="processing">
+              <ProcessingStep
+                progressPercent={progressPercent}
+                processingSteps={processingSteps}
+                error={error}
+                isProcessing={isProcessing}
+                onBack={() => setStep(4)}
+              />
+            </StepTransition>
           ) : null}
         </AnimatePresence>
       </div>
