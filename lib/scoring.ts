@@ -183,10 +183,17 @@ const pointVisibilityFactor = (points: Landmark[], indices: number[]) => {
       const point = getPoint(points, index);
       if (!point) return 0;
       const v = point.visibility;
-      return v == null ? 1 : clamp01(v);
+      if (v == null || !Number.isFinite(v)) return 1;
+      return clamp01(v);
     })
     .filter(Number.isFinite);
-  return vis.length ? avg(vis) : 0;
+
+  if (!vis.length) return 1;
+  const maxVis = Math.max(...vis);
+  const minVis = Math.min(...vis);
+  // FaceLandmarker often emits 0 visibility for all points in IMAGE mode.
+  if (maxVis <= 0.001 && minVis >= 0) return 1;
+  return avg(vis);
 };
 
 const metricBaseConfidence = (

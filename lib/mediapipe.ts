@@ -1041,6 +1041,92 @@ const mapFlippedCropPoints = (
     visibility: point.visibility ?? 0,
   }));
 
+const getPointAt = (
+  points: Array<{ x: number; y: number; z?: number; visibility?: number }>,
+  index: number
+) => (index >= 0 && index < points.length ? points[index] : null);
+
+const distance = (
+  a: { x: number; y: number },
+  b: { x: number; y: number }
+) => Math.hypot(a.x - b.x, a.y - b.y);
+
+const hasFaceLikeSpread = (
+  points: RawLandmark[],
+  expectedView?: "front" | "side",
+  transformed = false
+) => {
+  if (points.length < 100) return false;
+  const xs = points.map((point) => point.x).filter(Number.isFinite);
+  const ys = points.map((point) => point.y).filter(Number.isFinite);
+  if (!xs.length || !ys.length) return false;
+
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const spanX = maxX - minX;
+  const spanY = maxY - minY;
+  const area = spanX * spanY;
+  const centerX = (minX + maxX) / 2;
+  const centerY = (minY + maxY) / 2;
+  const thresholdShift = transformed ? 0.03 : 0;
+
+  if (expectedView === "side") {
+    if (spanX < 0.24 + thresholdShift || spanY < 0.34 + thresholdShift) return false;
+    if (area < 0.12 + thresholdShift) return false;
+  } else {
+    if (spanX < 0.28 + thresholdShift || spanY < 0.36 + thresholdShift) return false;
+    if (area < 0.16 + thresholdShift) return false;
+  }
+
+  if (centerX < 0.15 || centerX > 0.85 || centerY < 0.12 || centerY > 0.9) return false;
+
+  const leftEye = getPointAt(points, 33);
+  const rightEye = getPointAt(points, 263);
+  const brow = getPointAt(points, 168);
+  const chin = getPointAt(points, 152);
+  const nose = getPointAt(points, 1);
+  const mouthLeft = getPointAt(points, 61);
+  const mouthRight = getPointAt(points, 291);
+
+  if (!leftEye || !rightEye || !brow || !chin || !nose || !mouthLeft || !mouthRight) {
+    return false;
+  }
+
+  const eyeDistance = distance(leftEye, rightEye);
+  const browChinDistance = distance(brow, chin);
+  const mouthDistance = distance(mouthLeft, mouthRight);
+  const noseToChin = distance(nose, chin);
+
+  if (eyeDistance < 0.08 + thresholdShift) return false;
+  if (browChinDistance < 0.2 + thresholdShift) return false;
+  if (mouthDistance < 0.04) return false;
+  if (noseToChin < 0.12) return false;
+
+  return true;
+};
+
+const remapFlippedPose = (pose: PoseEstimate): PoseEstimate => {
+  if (pose.source === "none") return pose;
+  const candidates = pose.candidates?.map((candidate) => ({
+    ...candidate,
+    yaw: -candidate.yaw,
+    roll: -candidate.roll,
+  }));
+
+  return withPoseValidity(
+    -pose.yaw,
+    pose.pitch,
+    -pose.roll,
+    pose.source === "matrix" ? "matrix" : "fallback",
+    null,
+    pose.confidence * 0.72,
+    pose.selectedLabel ? `${pose.selectedLabel}-flipped` : "flipped",
+    candidates
+  );
+};
+
 const mapFromCropToOriginal = (
   points: Array<{ x: number; y: number; z?: number; visibility?: number }>,
   crop: { x: number; y: number; width: number; height: number },
@@ -1083,7 +1169,7 @@ const detectCropLandmarks = async (
   for (const candidate of candidates) {
     throwIfAborted(options.signal);
     const direct = await detectOnSource(candidate, options);
-    if (direct.points.length) {
+    if (direct.points.length && hasFaceLikeSpread(direct.points, options.expectedView, false)) {
       return {
         points: direct.points,
         pose: direct.pose,
@@ -1098,21 +1184,22 @@ const detectCropLandmarks = async (
     );
     if (flipped) {
       const flippedPoints = await detectOnSource(flipped, options);
-      if (flippedPoints.points.length) {
-        const mapped = mapFlippedCropPoints(flippedPoints.points);
+      const mapped = mapFlippedCropPoints(flippedPoints.points);
+      if (
+        flippedPoints.points.length &&
+        hasFaceLikeSpread(mapped, options.expectedView, true) &&
+        (options.expectedView !== "side" || Math.abs(flippedPoints.pose.yaw) >= 35)
+      ) {
         return {
           points: mapped,
-          pose: withPoseValidity(
-            -flippedPoints.pose.yaw,
-            flippedPoints.pose.pitch,
-            flippedPoints.pose.roll,
-            "fallback",
-            null,
-            0.35
-          ),
+          pose: remapFlippedPose(flippedPoints.pose),
           transformed: true,
         };
       }
+    }
+
+    if (options.expectedView === "side") {
+      continue;
     }
 
     for (const deg of [90, 270, 180] as const) {
@@ -1124,8 +1211,11 @@ const detectCropLandmarks = async (
       );
       if (!rotated) continue;
       const rotatedPoints = await detectOnSource(rotated, options);
-      if (rotatedPoints.points.length) {
-        const mapped = mapFromRotate(rotatedPoints.points, deg);
+      const mapped = mapFromRotate(rotatedPoints.points, deg);
+      if (
+        rotatedPoints.points.length &&
+        hasFaceLikeSpread(mapped, options.expectedView, true)
+      ) {
         return {
           points: mapped,
           pose: fallbackPoseFromPoints(mapped),
