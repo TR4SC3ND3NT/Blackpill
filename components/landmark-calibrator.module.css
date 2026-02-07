@@ -66,7 +66,7 @@
 .pointActive {
   fill: rgba(236, 73, 73, 1);
   stroke: rgba(255, 255, 255, 1);
-  stroke-width: 0.0011;
+  stroke-width: 0.0007;
 }
 
 .stageFooter {
@@ -276,8 +276,28 @@
 
 .actions {
   display: grid;
+  gap: 8px;
+}
+
+.actionRow {
+  display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+}
+
+.secondaryAction {
+  border-color: rgba(15, 29, 56, 0.24) !important;
+  color: rgba(15, 25, 46, 0.92) !important;
+  background: rgba(255, 255, 255, 0.98) !important;
+}
+
+.secondaryAction:disabled {
+  opacity: 0.55 !important;
+  border-color: rgba(15, 29, 56, 0.16) !important;
+}
+
+.primaryAction {
+  justify-content: center;
 }
 
 .error {
@@ -301,7 +321,7 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .actions {
+  .actionRow {
     grid-template-columns: minmax(0, 1fr);
   }
 }
