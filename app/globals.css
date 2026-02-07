@@ -1,0 +1,79 @@
+:root {
+  color-scheme: dark;
+  --bg: #07090d;
+  --bg-2: #0c111a;
+  --surface: rgba(14, 19, 30, 0.72);
+  --surface-2: rgba(18, 24, 38, 0.6);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.18);
+  --text: #e9edf6;
+  --muted: #a3adbd;
+  --accent: #6bdcff;
+  --accent-2: #c1ffb3;
+  --danger: #ff7d7d;
+  --shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+  --radius-lg: 22px;
+  --radius-md: 14px;
+  --radius-sm: 10px;
+  --container: 1120px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  padding: 0;
+  margin: 0;
+  min-height: 100%;
+  background: radial-gradient(1200px 700px at 10% -10%, rgba(107, 220, 255, 0.2), transparent 60%),
+    radial-gradient(900px 600px at 90% 0%, rgba(193, 255, 179, 0.16), transparent 55%),
+    linear-gradient(180deg, var(--bg), var(--bg-2));
+  color: var(--text);
+  font-family: var(--font-sans), "Space Grotesk", "Helvetica Neue", sans-serif;
+}
+
+body {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+}
+
+img {
+  max-width: 100%;
+  display: block;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
+.app-shell {
+  width: 100%;
+  min-height: 100vh;
+  padding: 48px 20px 80px;
+  display: flex;
+  justify-content: center;
+}
+
+.container {
+  width: 100%;
+  max-width: var(--container);
+}
+
+@media (max-width: 720px) {
+  .app-shell {
+    padding: 28px 16px 56px;
+  }
+}
