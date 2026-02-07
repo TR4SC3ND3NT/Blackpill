@@ -47,11 +47,7 @@ export default function OverallScorePanel({
       </div>
       {quality ? (
         <div className={styles.qualityRow}>
-          <QualityBadge
-            frontCount={quality.frontCount}
-            sideCount={quality.sideCount}
-            quality={quality.quality}
-          />
+          <QualityBadge quality={quality.quality} />
         </div>
       ) : null}
       <div className={styles.overallTabs}>
