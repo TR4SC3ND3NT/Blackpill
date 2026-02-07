@@ -2,18 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DragEvent as ReactDragEvent } from "react";
-import { AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
 import styles from "./page.module.css";
 import HomeHeader from "@/components/page-parts/HomeHeader";
 import HomeStepper from "@/components/page-parts/HomeStepper";
-import StepTransition from "@/components/page-parts/StepTransition";
-import GenderStep from "@/components/page-parts/steps/GenderStep";
-import EthnicityStep from "@/components/page-parts/steps/EthnicityStep";
-import UploadStep from "@/components/page-parts/steps/UploadStep";
-import ConsentStep from "@/components/page-parts/steps/ConsentStep";
-import CalibrationStep from "@/components/page-parts/steps/CalibrationStep";
-import ProcessingStep from "@/components/page-parts/steps/ProcessingStep";
+import HomeStepRenderer from "@/components/page-parts/HomeStepRenderer";
 import {
   detectLandmarks,
   detectLandmarksWithBBoxFallback,
@@ -672,143 +665,94 @@ export default function Home() {
         <HomeHeader />
         <HomeStepper items={stepItems} />
 
-        <AnimatePresence mode="wait">
-          {step === 0 ? (
-            <StepTransition stepKey="gender">
-              <GenderStep
-                gender={gender}
-                error={error}
-                onSelectGender={(value) => {
-                  setGender(value);
-                  setError(null);
-                }}
-                onContinue={() => {
-                  if (!gender) {
-                    setError("Please select a gender to continue.");
-                    return;
-                  }
-                  setError(null);
-                  setStep(1);
-                }}
-              />
-            </StepTransition>
-          ) : null}
-
-          {step === 1 ? (
-            <StepTransition stepKey="ethnicity">
-              <EthnicityStep
-                race={race}
-                error={error}
-                onSelectRace={(value) => {
-                  setRace(value);
-                  setError(null);
-                }}
-                onBack={() => setStep(0)}
-                onContinue={() => {
-                  if (!race) {
-                    setError("Please select an ethnicity to continue.");
-                    return;
-                  }
-                  setError(null);
-                  setStep(2);
-                }}
-              />
-            </StepTransition>
-          ) : null}
-
-          {step === 2 ? (
-            <StepTransition stepKey="upload">
-              <UploadStep
-                frontImage={frontImage}
-                sideImage={sideImage}
-                activeDropZone={activeDropZone}
-                frontInputRef={frontInputRef}
-                sideInputRef={sideInputRef}
-                error={error}
-                canProceed={Boolean(canProceed)}
-                setActiveDropZone={setActiveDropZone}
-                onFrontFileChange={(file) => void handleFile(file, setFrontImage)}
-                onSideFileChange={(file) => void handleFile(file, setSideImage)}
-                onFrontDrop={(event) => void handleDropUpload(event, setFrontImage, "front")}
-                onSideDrop={(event) => void handleDropUpload(event, setSideImage, "side")}
-                onBack={() => setStep(1)}
-                onContinue={() => setStep(3)}
-                onReset={() => {
-                  setFrontImage(null);
-                  setSideImage(null);
-                  setActiveDropZone(null);
-                }}
-              />
-            </StepTransition>
-          ) : null}
-
-          {step === 3 ? (
-            <StepTransition stepKey="consent">
-              <ConsentStep
-                consent={consent}
-                error={error}
-                warmupError={warmupError}
-                onConsentChange={setConsent}
-                onBack={() => setStep(2)}
-                onStartCalibration={() => {
-                  if (!consent) {
-                    setError("Please confirm consent to continue.");
-                    return;
-                  }
-                  setPreviewError(null);
-                  setPreviewData(null);
-                  setPreviewStatus(null);
-                  setManualCalibration(null);
-                  previewRequestKeyRef.current = null;
-                  setError(null);
-                  setStep(4);
-                }}
-              />
-            </StepTransition>
-          ) : null}
-
-          {step === 4 ? (
-            <StepTransition stepKey="landmark-calibration">
-              <CalibrationStep
-                frontImage={frontImage}
-                sideImage={sideImage}
-                previewData={previewData}
-                previewLoading={previewLoading}
-                previewStatus={previewStatus}
-                previewError={previewError}
-                error={error}
-                gender={gender}
-                race={race}
-                manualCalibration={manualCalibration}
-                onBackToConsent={() => setStep(3)}
-                onRetryPreparation={() => {
-                  setPreviewError(null);
-                  setPreviewData(null);
-                  setPreviewStatus(null);
-                  setManualCalibration(null);
-                  previewRequestKeyRef.current = null;
-                }}
-                onComplete={(result) => {
-                  setManualCalibration(result);
-                  setError(null);
-                  setStep(5);
-                }}
-              />
-            </StepTransition>
-          ) : null}
-
-          {step === 5 ? (
-            <StepTransition stepKey="processing">
-              <ProcessingStep
-                progressPercent={progressPercent}
-                processingSteps={processingSteps}
-                error={error}
-                isProcessing={isProcessing}
-                onBack={() => setStep(4)}
-              />
-            </StepTransition>
-          ) : null}
-        </AnimatePresence>
+        <HomeStepRenderer
+          step={step}
+          gender={gender}
+          race={race}
+          consent={consent}
+          error={error}
+          warmupError={warmupError}
+          frontImage={frontImage}
+          sideImage={sideImage}
+          activeDropZone={activeDropZone}
+          frontInputRef={frontInputRef}
+          sideInputRef={sideInputRef}
+          canProceed={Boolean(canProceed)}
+          previewData={previewData}
+          previewLoading={previewLoading}
+          previewStatus={previewStatus}
+          previewError={previewError}
+          manualCalibration={manualCalibration}
+          processingSteps={processingSteps}
+          progressPercent={progressPercent}
+          isProcessing={isProcessing}
+          onSelectGender={(value) => {
+            setGender(value);
+            setError(null);
+          }}
+          onSelectRace={(value) => {
+            setRace(value);
+            setError(null);
+          }}
+          onConsentChange={setConsent}
+          onFrontFileChange={(file) => void handleFile(file, setFrontImage)}
+          onSideFileChange={(file) => void handleFile(file, setSideImage)}
+          onFrontDrop={(event) => void handleDropUpload(event, setFrontImage, "front")}
+          onSideDrop={(event) => void handleDropUpload(event, setSideImage, "side")}
+          setActiveDropZone={setActiveDropZone}
+          onResetUploads={() => {
+            setFrontImage(null);
+            setSideImage(null);
+            setActiveDropZone(null);
+          }}
+          onBackFromEthnicity={() => setStep(0)}
+          onBackFromUpload={() => setStep(1)}
+          onBackFromConsent={() => setStep(2)}
+          onBackFromCalibration={() => setStep(3)}
+          onBackFromProcessing={() => setStep(4)}
+          onContinueFromGender={() => {
+            if (!gender) {
+              setError("Please select a gender to continue.");
+              return;
+            }
+            setError(null);
+            setStep(1);
+          }}
+          onContinueFromEthnicity={() => {
+            if (!race) {
+              setError("Please select an ethnicity to continue.");
+              return;
+            }
+            setError(null);
+            setStep(2);
+          }}
+          onContinueFromUpload={() => setStep(3)}
+          onStartCalibration={() => {
+            if (!consent) {
+              setError("Please confirm consent to continue.");
+              return;
+            }
+            setPreviewError(null);
+            setPreviewData(null);
+            setPreviewStatus(null);
+            setManualCalibration(null);
+            previewRequestKeyRef.current = null;
+            setError(null);
+            setStep(4);
+          }}
+          onRetryPreview={() => {
+            setPreviewError(null);
+            setPreviewData(null);
+            setPreviewStatus(null);
+            setManualCalibration(null);
+            previewRequestKeyRef.current = null;
+          }}
+          onCompleteCalibration={(result) => {
+            setManualCalibration(result);
+            setError(null);
+            setStep(5);
+          }}
+        />
       </div>
     </main>
   );
