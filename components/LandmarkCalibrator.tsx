@@ -228,14 +228,10 @@ export default function LandmarkCalibrator({
     movePointTo(x, y);
   }, [phase, activeViewBox.x, activeViewBox.y, activeViewBox.width, activeViewBox.height, movePointTo]);
 
-  const goPrevious = useCallback(() => {
+  const goBack = useCallback(() => {
     setError(null);
     if (phase === "front_steps") {
-      if (frontCursor === 0) {
-        onBack();
-      } else {
-        setFrontCursor((idx) => Math.max(0, idx - 1));
-      }
+      onBack();
       return;
     }
 
@@ -246,11 +242,7 @@ export default function LandmarkCalibrator({
     }
 
     if (phase === "side_steps") {
-      if (sideCursor === 0) {
-        setPhase("front_summary");
-      } else {
-        setSideCursor((idx) => Math.max(0, idx - 1));
-      }
+      setPhase("front_summary");
       return;
     }
 
@@ -262,7 +254,24 @@ export default function LandmarkCalibrator({
         setPhase("front_summary");
       }
     }
-  }, [phase, frontCursor, sideCursor, onBack, frontIndices.length, sideIndices.length]);
+  }, [phase, onBack, frontIndices.length, sideIndices.length]);
+
+  const goPreviousPoint = useCallback(() => {
+    setError(null);
+    if (phase === "front_steps") {
+      if (frontCursor > 0) {
+        setFrontCursor((idx) => Math.max(0, idx - 1));
+      }
+      return;
+    }
+    if (phase === "side_steps") {
+      if (sideCursor > 0) {
+        setSideCursor((idx) => Math.max(0, idx - 1));
+      } else {
+        setPhase("front_summary");
+      }
+    }
+  }, [phase, frontCursor, sideCursor]);
 
   const acceptCurrentAndAdvance = useCallback(() => {
     if (!isStepPhase(phase) || !activePoint || activeGlobalIndex < 0) return;
@@ -359,7 +368,7 @@ export default function LandmarkCalibrator({
       }
       if (event.key === "Backspace") {
         event.preventDefault();
-        goPrevious();
+        goPreviousPoint();
         return;
       }
       if (event.key.toLowerCase() === "r") {
@@ -394,7 +403,7 @@ export default function LandmarkCalibrator({
     frontIndices.length,
     sideIndices.length,
     acceptCurrentAndAdvance,
-    goPrevious,
+    goPreviousPoint,
     moveByPixels,
     resetCurrent,
   ]);
@@ -442,8 +451,15 @@ export default function LandmarkCalibrator({
         : "";
 
   const pointRadius = isStepPhase(phase)
-    ? Math.max(0.00095, activeViewBox.width * 0.0042)
-    : 0.0019;
+    ? Math.max(0.00042, activeViewBox.width * 0.00145)
+    : 0.00095;
+
+  const canGoPreviousPoint =
+    phase === "front_steps"
+      ? frontCursor > 0
+      : phase === "side_steps"
+        ? sideCursor > 0 || frontIndices.length > 0
+        : false;
 
   if (!points.length) {
     return <div className={styles.empty}>Preparing landmark calibration...</div>;
@@ -658,41 +674,52 @@ export default function LandmarkCalibrator({
         {error ? <div className={styles.error}>{error}</div> : null}
 
         <div className={styles.actions}>
-          <Button variant="ghost" onClick={goPrevious}>
-            Back
-          </Button>
-
           {isStepPhase(phase) ? (
             <>
-              <Button
-                variant="ghost"
-                onClick={() => {
-                  if (phase === "front_steps") {
-                    if (frontCursor > 0) setFrontCursor((idx) => idx - 1);
-                  } else if (phase === "side_steps") {
-                    if (sideCursor > 0) {
-                      setSideCursor((idx) => idx - 1);
-                    } else {
-                      setPhase("front_summary");
-                    }
-                  }
-                }}
-              >
-                Previous Point
-              </Button>
-              <Button variant="ghost" onClick={resetCurrent}>
-                Reset Point
-              </Button>
-              <Button onClick={acceptCurrentAndAdvance}>Next</Button>
+              <div className={styles.actionRow}>
+                <Button variant="ghost" className={styles.secondaryAction} onClick={goBack}>
+                  Back
+                </Button>
+                <Button className={styles.primaryAction} onClick={acceptCurrentAndAdvance}>
+                  Next
+                </Button>
+              </div>
+              <div className={styles.actionRow}>
+                <Button
+                  variant="ghost"
+                  className={styles.secondaryAction}
+                  onClick={goPreviousPoint}
+                  disabled={!canGoPreviousPoint}
+                >
+                  Previous Point
+                </Button>
+                <Button variant="ghost" className={styles.secondaryAction} onClick={resetCurrent}>
+                  Reset Point
+                </Button>
+              </div>
             </>
           ) : null}
 
           {phase === "front_summary" ? (
-            <Button onClick={openSidePhase}>Continue to Side/Profile</Button>
+            <div className={styles.actionRow}>
+              <Button variant="ghost" className={styles.secondaryAction} onClick={goBack}>
+                Back
+              </Button>
+              <Button className={styles.primaryAction} onClick={openSidePhase}>
+                Continue to Side/Profile
+              </Button>
+            </div>
           ) : null}
 
           {phase === "side_summary" ? (
-            <Button onClick={finishCalibration}>Continue to Analysis</Button>
+            <div className={styles.actionRow}>
+              <Button variant="ghost" className={styles.secondaryAction} onClick={goBack}>
+                Back
+              </Button>
+              <Button className={styles.primaryAction} onClick={finishCalibration}>
+                Continue to Analysis
+              </Button>
+            </div>
           ) : null}
         </div>
       </aside>
