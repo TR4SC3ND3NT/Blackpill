@@ -49,8 +49,6 @@ export default function FeaturesPage() {
     return <div className={styles.statCard}>No analysis data found.</div>;
   }
 
-  const frontCount = face.mediapipeLandmarks?.length ?? face.frontLandmarks?.length ?? 0;
-  const sideCount = face.sideLandmarks?.length ?? 0;
   const qualityLevel =
     face.frontQuality?.quality === "ok" && face.sideQuality?.quality === "ok"
       ? "ok"
@@ -103,7 +101,7 @@ export default function FeaturesPage() {
       </motion.div>
 
       <div className={styles.qualityRow}>
-        <QualityBadge frontCount={frontCount} sideCount={sideCount} quality={qualityLevel} />
+        <QualityBadge quality={qualityLevel} />
       </div>
 
       <div className={styles.heroGrid}>
