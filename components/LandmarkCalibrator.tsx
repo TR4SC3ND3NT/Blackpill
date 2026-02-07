@@ -433,8 +433,8 @@ export default function LandmarkCalibrator({
         : "";
 
   const pointRadius = isStepPhase(phase)
-    ? Math.max(0.0028, activeViewBox.width * 0.013)
-    : 0.0055;
+    ? Math.max(0.00095, activeViewBox.width * 0.0042)
+    : 0.0019;
 
   if (!points.length) {
     return <div className={styles.empty}>Preparing landmark calibration...</div>;

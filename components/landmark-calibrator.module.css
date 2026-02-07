@@ -54,19 +54,19 @@
 .pointPending {
   fill: rgba(255, 102, 102, 0.88);
   stroke: rgba(255, 255, 255, 0.92);
-  stroke-width: 0.0018;
+  stroke-width: 0.001;
 }
 
 .pointConfirmed {
   fill: rgba(49, 194, 108, 0.9);
   stroke: rgba(255, 255, 255, 0.95);
-  stroke-width: 0.0018;
+  stroke-width: 0.001;
 }
 
 .pointActive {
   fill: rgba(236, 73, 73, 1);
   stroke: rgba(255, 255, 255, 1);
-  stroke-width: 0.0022;
+  stroke-width: 0.0011;
 }
 
 .stageFooter {
