@@ -1,7 +1,7 @@
 "use client";
 /* eslint-disable @next/next/no-img-element */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import type { ManualLandmarkPoint, PhotoQuality } from "@/lib/types";
 import {
@@ -186,13 +186,13 @@ export default function LandmarkCalibrator({
     };
   }, [phase, activePoint, zoomLevel]);
 
-  const updatePoint = (index: number, patch: Partial<ManualLandmarkPoint>) => {
+  const updatePoint = useCallback((index: number, patch: Partial<ManualLandmarkPoint>) => {
     setPoints((prev) =>
       prev.map((point, idx) => (idx === index ? { ...point, ...patch } : point))
     );
-  };
+  }, []);
 
-  const movePointTo = (x: number, y: number) => {
+  const movePointTo = useCallback((x: number, y: number) => {
     if (!isStepPhase(phase) || !activePoint || activeGlobalIndex < 0) return;
     updatePoint(activeGlobalIndex, {
       x: clamp01(x),
@@ -203,17 +203,17 @@ export default function LandmarkCalibrator({
       confirmed: false,
     });
     setError(null);
-  };
+  }, [phase, activePoint, activeGlobalIndex, updatePoint]);
 
-  const moveByPixels = (dxPx: number, dyPx: number) => {
+  const moveByPixels = useCallback((dxPx: number, dyPx: number) => {
     if (!isStepPhase(phase) || !activePoint || !activeImage) return;
     movePointTo(
       activePoint.x + dxPx / Math.max(1, activeImage.width),
       activePoint.y + dyPx / Math.max(1, activeImage.height)
     );
-  };
+  }, [phase, activePoint, activeImage, movePointTo]);
 
-  const setByPointerEvent = (event: ReactPointerEvent<HTMLDivElement>) => {
+  const setByPointerEvent = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (!isStepPhase(phase)) return;
     const container = stageRef.current;
     if (!container) return;
@@ -226,9 +226,9 @@ export default function LandmarkCalibrator({
     const y = activeViewBox.y + relY * activeViewBox.height;
 
     movePointTo(x, y);
-  };
+  }, [phase, activeViewBox.x, activeViewBox.y, activeViewBox.width, activeViewBox.height, movePointTo]);
 
-  const goPrevious = () => {
+  const goPrevious = useCallback(() => {
     setError(null);
     if (phase === "front_steps") {
       if (frontCursor === 0) {
@@ -262,9 +262,9 @@ export default function LandmarkCalibrator({
         setPhase("front_summary");
       }
     }
-  };
+  }, [phase, frontCursor, sideCursor, onBack, frontIndices.length, sideIndices.length]);
 
-  const acceptCurrentAndAdvance = () => {
+  const acceptCurrentAndAdvance = useCallback(() => {
     if (!isStepPhase(phase) || !activePoint || activeGlobalIndex < 0) return;
     if (!isValidPoint(activePoint)) {
       setError("Current landmark is invalid. Reset or place it inside the photo bounds.");
@@ -294,15 +294,24 @@ export default function LandmarkCalibrator({
         setSideCursor((idx) => Math.min(sideIndices.length - 1, idx + 1));
       }
     }
-  };
+  }, [
+    phase,
+    activePoint,
+    activeGlobalIndex,
+    updatePoint,
+    frontCursor,
+    frontIndices.length,
+    sideCursor,
+    sideIndices.length,
+  ]);
 
-  const resetCurrent = () => {
+  const resetCurrent = useCallback(() => {
     if (!isStepPhase(phase) || !activePoint || activeGlobalIndex < 0) return;
     const initial = initialMapRef.current.get(activePoint.id);
     if (!initial) return;
     updatePoint(activeGlobalIndex, { ...initial });
     setError(null);
-  };
+  }, [phase, activePoint, activeGlobalIndex, updatePoint]);
 
   const openSidePhase = () => {
     if (!completionFront.ready) {
