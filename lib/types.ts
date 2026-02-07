@@ -5,10 +5,14 @@ export type Landmark = {
   visibility?: number;
 };
 
-export type ViewLabel = "front" | "side" | "unknown";
+export type ViewLabel = "front" | "three_quarter" | "side" | "unknown";
 
 export type ReasonCode =
   | "bad_pose"
+  | "not_enough_yaw"
+  | "excessive_pitch"
+  | "excessive_roll"
+  | "side_ok_three_quarter"
   | "occlusion"
   | "blur"
   | "out_of_frame"
@@ -51,6 +55,7 @@ export type PhotoQuality = {
   pose: PoseEstimate;
   expectedView: "front" | "side";
   viewValid: boolean;
+  viewWeight: number;
   reasonCodes: ReasonCode[];
 };
 

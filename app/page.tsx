@@ -60,6 +60,7 @@ type UploadDebug = {
   detectedView?: PhotoQuality["detectedView"];
   transformed?: boolean;
   viewValid?: boolean;
+  viewWeight?: number;
   reasonCodes?: ReasonCode[];
   landmarksSource: string;
   evaluateSource: string;
@@ -105,6 +106,12 @@ const compressImage = async (file: File) => {
 
 const clamp = (value: number, min: number, max: number) =>
   Math.max(min, Math.min(max, value));
+
+const smoothstep = (edge0: number, edge1: number, x: number) => {
+  if (edge1 <= edge0) return x >= edge1 ? 1 : 0;
+  const t = clamp((x - edge0) / (edge1 - edge0), 0, 1);
+  return t * t * (3 - 2 * t);
+};
 
 const normalizeLandmarksForImage = (
   points: Landmark[],
@@ -247,23 +254,39 @@ const evaluatePhoto = async (
     reasonCodes.add("blur");
   }
 
-  const detectedView = pose.view;
-  const viewValid = expectedView === "front" ? pose.validFront : pose.validSide;
+  const absYaw = Math.abs(pose.yaw);
+  const absPitch = Math.abs(pose.pitch);
   const absRoll = Math.abs(pose.roll);
+  const detectedView: PhotoQuality["detectedView"] =
+    absYaw <= 15 ? "front" : absYaw < 60 ? "three_quarter" : "side";
+  const viewValid = expectedView === "front" ? pose.validFront : absYaw >= 25;
+  let viewWeight = expectedView === "side" ? smoothstep(25, 65, absYaw) : 1;
 
   if (hasLandmarks && !viewValid) {
     reasonCodes.add("bad_pose");
     if (expectedView === "side") {
+      reasonCodes.add("not_enough_yaw");
       reasonCodes.add("side_disabled");
+      viewWeight = 0;
     }
     if (expectedView === "front") {
       warnings.push("Front photo is not a frontal view.");
     } else {
-      warnings.push("Side photo is not a true profile.");
+      warnings.push("Side angle is too frontal for profile metrics.");
     }
   }
 
+  if (expectedView === "side" && hasLandmarks && absYaw >= 25 && absYaw < 60) {
+    reasonCodes.add("side_ok_three_quarter");
+  }
+
+  if (hasLandmarks && expectedView === "side" && absPitch > 20) {
+    reasonCodes.add("excessive_pitch");
+    warnings.push("Side pitch is high; profile confidence reduced.");
+  }
+
   if (hasLandmarks && absRoll > 30) {
+    reasonCodes.add("excessive_roll");
     warnings.push("Head is tilted; metrics are roll-corrected.");
   }
 
@@ -289,8 +312,18 @@ const evaluatePhoto = async (
     reasonCodes.add("low_landmark_conf");
   }
 
-  let confidence = hasLandmarks ? clamp(pose.confidence || 0.5, 0, 1) : 0;
-  if (!viewValid) confidence *= 0.78;
+  let confidence = hasLandmarks
+    ? clamp(
+        expectedView === "side" ? 0.55 + (pose.confidence || 0) * 0.35 : 0.6 + (pose.confidence || 0) * 0.4,
+        0,
+        1
+      )
+    : 0;
+  if (expectedView === "side") {
+    confidence *= 0.45 + viewWeight * 0.55;
+    if (absPitch > 20) confidence *= clamp(1 - (absPitch - 20) / 28, 0.45, 1);
+  }
+  if (!viewValid) confidence *= 0.72;
   if (!faceInFrame) confidence *= 0.8;
   if (blurVariance < BLUR_THRESHOLD) confidence *= 0.78;
   if (minSidePx < MIN_SIDE_PX) confidence *= 0.82;
@@ -318,6 +351,7 @@ const evaluatePhoto = async (
       pose,
       expectedView,
       viewValid,
+      viewWeight,
       reasonCodes: Array.from(reasonCodes),
       issues: [...errors, ...warnings],
     },
@@ -416,6 +450,7 @@ const buildUploadDebug = async (
       detectedView: qualityCheck.quality.detectedView,
       transformed: detection.transformed,
       viewValid: qualityCheck.quality.viewValid,
+      viewWeight: qualityCheck.quality.viewWeight,
       reasonCodes: qualityCheck.quality.reasonCodes,
       blurVariance: qualityCheck.quality.blurVariance,
     };
@@ -800,7 +835,7 @@ export default function Home() {
         quality: "low",
         issues: mergeIssues([...sideQuality.issues, sideWarning]),
       };
-    } else if (!sideCheck.quality.viewValid) {
+    } else if (sideCheck.quality.reasonCodes.includes("side_disabled")) {
       sideWarning = "Side pose invalid - profile metrics disabled.";
       sideQuality = {
         ...sideQuality,
@@ -1008,7 +1043,7 @@ export default function Home() {
               : `${sideMessage} Continuing with low-confidence side analysis.`;
             updateProcessing("landmarks", "done", note);
           } else {
-            if (!sideCheck.quality.viewValid) {
+            if (sideCheck.quality.reasonCodes.includes("side_disabled")) {
               const sideMessage = "Side pose invalid - profile metrics disabled.";
               setError(sideMessage);
               warningsList.push(sideMessage);
@@ -1442,6 +1477,12 @@ export default function Home() {
                             </span>
                           </div>
                           <div className={styles.debugRow}>
+                            <span className={styles.debugLabel}>view weight</span>
+                            <span className={styles.debugValue}>
+                              {formatNumber(frontDebug?.viewWeight, 2)}
+                            </span>
+                          </div>
+                          <div className={styles.debugRow}>
                             <span className={styles.debugLabel}>transformed</span>
                             <span className={styles.debugValue}>
                               {formatBool(frontDebug?.transformed)}
@@ -1610,6 +1651,12 @@ export default function Home() {
                             <span className={styles.debugLabel}>view valid</span>
                             <span className={styles.debugValue}>
                               {formatBool(sideDebug?.viewValid)}
+                            </span>
+                          </div>
+                          <div className={styles.debugRow}>
+                            <span className={styles.debugLabel}>view weight</span>
+                            <span className={styles.debugValue}>
+                              {formatNumber(sideDebug?.viewWeight, 2)}
                             </span>
                           </div>
                           <div className={styles.debugRow}>
@@ -1833,6 +1880,12 @@ export default function Home() {
                           </span>
                         </div>
                         <div className={styles.debugRow}>
+                          <span className={styles.debugLabel}>view weight</span>
+                          <span className={styles.debugValue}>
+                            {formatNumber(previewData.frontQuality.viewWeight, 2)}
+                          </span>
+                        </div>
+                        <div className={styles.debugRow}>
                           <span className={styles.debugLabel}>transformed</span>
                           <span className={styles.debugValue}>
                             {formatBool(previewData.frontTransformed)}
@@ -1948,6 +2001,12 @@ export default function Home() {
                           <span className={styles.debugLabel}>view valid</span>
                           <span className={styles.debugValue}>
                             {formatBool(previewData.sideQuality.viewValid)}
+                          </span>
+                        </div>
+                        <div className={styles.debugRow}>
+                          <span className={styles.debugLabel}>view weight</span>
+                          <span className={styles.debugValue}>
+                            {formatNumber(previewData.sideQuality.viewWeight, 2)}
                           </span>
                         </div>
                         <div className={styles.debugRow}>

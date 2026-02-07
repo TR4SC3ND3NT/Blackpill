@@ -106,6 +106,7 @@ const makeQuality = (
 ): PhotoQuality => {
   const pose = patch?.pose ?? makePose(expectedView);
   const viewValid = expectedView === "front" ? pose.validFront : pose.validSide;
+  const viewWeight = expectedView === "side" ? (viewValid ? 1 : 0) : 1;
   return {
     poseYaw: pose.yaw,
     posePitch: pose.pitch,
@@ -121,6 +122,7 @@ const makeQuality = (
     pose,
     expectedView,
     viewValid,
+    viewWeight,
     reasonCodes: [],
     ...patch,
   };
@@ -206,8 +208,9 @@ test("invalid side pose disables side metrics without collapsing overall", () =>
       detectedView: sidePoseInvalid.view,
       confidence: sidePoseInvalid.confidence,
       viewValid: false,
+      viewWeight: 0,
       quality: "low",
-      reasonCodes: ["bad_pose", "side_disabled"],
+      reasonCodes: ["bad_pose", "not_enough_yaw", "side_disabled"],
       issues: ["side invalid"],
     }),
   });
@@ -215,9 +218,7 @@ test("invalid side pose disables side metrics without collapsing overall", () =>
   const sideMetrics = result.metricDiagnostics.filter((metric) => metric.view === "side");
   assert.ok(sideMetrics.length > 0);
   assert.ok(sideMetrics.every((metric) => metric.scored === false));
-  assert.ok(
-    sideMetrics.every((metric) => metric.validityReason === "bad_pose")
-  );
+  assert.ok(sideMetrics.every((metric) => metric.insufficient));
   assert.ok(result.overallScore >= 45);
 
   const allAssessments = [
@@ -227,4 +228,42 @@ test("invalid side pose disables side metrics without collapsing overall", () =>
   ];
   const insufficient = allAssessments.filter((item) => item.insufficient);
   assert.ok(insufficient.every((item) => item.score >= 50));
+});
+
+test("three-quarter side keeps profile metrics scored with reduced weight", () => {
+  const front = buildFrontLandmarks();
+  const side = buildSideLandmarks();
+
+  const sidePose = makePose("side", {
+    yaw: 42,
+    pitch: 4,
+    roll: 16,
+    view: "three_quarter",
+    validSide: false,
+    confidence: 0.82,
+  });
+
+  const result = computeScores({
+    frontLandmarks: front,
+    sideLandmarks: side,
+    frontQuality: makeQuality("front"),
+    sideQuality: makeQuality("side", {
+      pose: sidePose,
+      poseYaw: sidePose.yaw,
+      posePitch: sidePose.pitch,
+      poseRoll: sidePose.roll,
+      detectedView: sidePose.view,
+      confidence: 0.72,
+      viewValid: true,
+      viewWeight: 0.45,
+      quality: "low",
+      reasonCodes: ["side_ok_three_quarter", "excessive_roll"],
+      issues: ["three-quarter"],
+    }),
+  });
+
+  const sideMetrics = result.metricDiagnostics.filter((metric) => metric.view === "side");
+  assert.ok(sideMetrics.length > 0);
+  assert.ok(sideMetrics.some((metric) => metric.scored));
+  assert.ok(sideMetrics.some((metric) => metric.usedWeight > 0));
 });

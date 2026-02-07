@@ -105,6 +105,10 @@ const FRONT_MIRROR_PAIRS: Array<[number, number]> = [
 const reasonPenaltyMultiplier = (reasonCodes: ReasonCode[]) => {
   let factor = 1;
   if (reasonCodes.includes("bad_pose")) factor *= 0.84;
+  if (reasonCodes.includes("not_enough_yaw")) factor *= 0.6;
+  if (reasonCodes.includes("excessive_pitch")) factor *= 0.8;
+  if (reasonCodes.includes("excessive_roll")) factor *= 0.92;
+  if (reasonCodes.includes("side_ok_three_quarter")) factor *= 0.96;
   if (reasonCodes.includes("blur")) factor *= 0.82;
   if (reasonCodes.includes("out_of_frame")) factor *= 0.72;
   if (reasonCodes.includes("occlusion")) factor *= 0.78;
@@ -168,6 +172,7 @@ const defaultQuality = (expectedView: "front" | "side"): PhotoQuality => ({
   },
   expectedView,
   viewValid: false,
+  viewWeight: 0,
   reasonCodes: ["low_landmark_conf"],
 });
 
@@ -215,6 +220,7 @@ const metricBaseConfidence = (
   if (view === "side") {
     return (
       clamp01(ctx.sideQuality.confidence) *
+      clamp01(ctx.sideQuality.viewWeight) *
       reasonPenaltyMultiplier(ctx.sideQuality.reasonCodes) *
       sidePoints
     );
@@ -226,6 +232,7 @@ const metricBaseConfidence = (
     frontPoints;
   const side =
     clamp01(ctx.sideQuality.confidence) *
+    clamp01(ctx.sideQuality.viewWeight) *
     reasonPenaltyMultiplier(ctx.sideQuality.reasonCodes) *
     sidePoints;
   return clamp01(front * 0.65 + side * 0.35);
@@ -770,25 +777,6 @@ const evaluateMetric = (metric: MetricDefinition, ctx: ScoreContext): MetricResu
     };
   }
 
-  if (metric.view === "side" && !ctx.sideQuality.pose.validSide) {
-    return {
-      id: metric.id,
-      title: metric.title,
-      pillar: metric.pillar,
-      view: metric.view,
-      value: null,
-      score: null,
-      confidence: clamp01(ctx.sideQuality.confidence),
-      baseWeight: metric.baseWeight,
-      usedWeight: 0,
-      scored: false,
-      insufficient: true,
-      validityReason: "bad_pose",
-      reasonCodes: ["bad_pose", "side_disabled"],
-      errorBar: null,
-    };
-  }
-
   const value = metric.formula(ctx);
   const reasonCodes =
     metric.view === "front"
@@ -800,7 +788,8 @@ const evaluateMetric = (metric: MetricDefinition, ctx: ScoreContext): MetricResu
           );
 
   const confidence = metricBaseConfidence(metric.view, ctx, metric.requiredPoints);
-  const confidenceThreshold = 0.45;
+  const confidenceThreshold =
+    metric.view === "side" ? 0.16 : metric.view === "either" ? 0.22 : 0.24;
 
   if (value == null || !Number.isFinite(value)) {
     return {

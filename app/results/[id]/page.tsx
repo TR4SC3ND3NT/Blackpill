@@ -293,6 +293,12 @@ export default function ResultsOverviewPage() {
             </span>
           </div>
           <div className={styles.diagnosticItem}>
+            <span className={styles.diagnosticLabel}>front.viewWeight</span>
+            <span className={styles.diagnosticValue}>
+              {formatFloat(diagnostics.frontQuality?.viewWeight)}
+            </span>
+          </div>
+          <div className={styles.diagnosticItem}>
             <span className={styles.diagnosticLabel}>front.confidence</span>
             <span className={styles.diagnosticValue}>
               {formatFloat(diagnostics.frontQuality?.confidence)}
@@ -381,6 +387,12 @@ export default function ResultsOverviewPage() {
                   ? "true"
                   : "false"
                 : "--"}
+            </span>
+          </div>
+          <div className={styles.diagnosticItem}>
+            <span className={styles.diagnosticLabel}>side.viewWeight</span>
+            <span className={styles.diagnosticValue}>
+              {formatFloat(diagnostics.sideQuality?.viewWeight)}
             </span>
           </div>
           <div className={styles.diagnosticItem}>

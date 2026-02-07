@@ -245,6 +245,7 @@ const ROLL_WARNING_LIMIT = 30;
 const classifyViewFromYaw = (yaw: number): PoseEstimate["view"] => {
   const absYaw = Math.abs(yaw);
   if (absYaw <= 15) return "front";
+  if (absYaw < 60) return "three_quarter";
   if (absYaw >= 60) return "side";
   return "unknown";
 };
