@@ -18,13 +18,69 @@ export type LandmarkCalibrationDef = {
   forceManual?: boolean;
   hairSensitive?: boolean;
   assetKey: string;
+  referenceFallbackKeys?: string[];
 };
 
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
 
 const dedupe = (items: string[]) => Array.from(new Set(items.filter(Boolean)));
 
-const pointAt = (points: Landmark[], index: number | null): Landmark | null => {
+type NormalizedPoint = {
+  x: number;
+  y: number;
+  visibility: number;
+};
+
+type LandmarkStats = {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+  width: number;
+  height: number;
+  cx: number;
+  cy: number;
+};
+
+const normalizeLandmarkArray = (points: Landmark[]): NormalizedPoint[] => {
+  if (!points.length) return [];
+  const maxX = Math.max(...points.map((point) => Math.abs(point.x)));
+  const maxY = Math.max(...points.map((point) => Math.abs(point.y)));
+  const scaleX = maxX > 2 ? maxX : 1;
+  const scaleY = maxY > 2 ? maxY : 1;
+  return points.map((point) => ({
+    x: clamp01(point.x / scaleX),
+    y: clamp01(point.y / scaleY),
+    visibility:
+      point.visibility == null || !Number.isFinite(point.visibility)
+        ? 1
+        : clamp01(point.visibility),
+  }));
+};
+
+const statsFor = (points: NormalizedPoint[]): LandmarkStats | null => {
+  if (!points.length) return null;
+  const xs = points.map((point) => point.x);
+  const ys = points.map((point) => point.y);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const width = Math.max(1e-3, maxX - minX);
+  const height = Math.max(1e-3, maxY - minY);
+  return {
+    minX,
+    maxX,
+    minY,
+    maxY,
+    width,
+    height,
+    cx: (minX + maxX) / 2,
+    cy: (minY + maxY) / 2,
+  };
+};
+
+const pointAtNormalized = (points: NormalizedPoint[], index: number | null) => {
   if (index == null) return null;
   if (index < 0 || index >= points.length) return null;
   const point = points[index];
@@ -33,18 +89,60 @@ const pointAt = (points: Landmark[], index: number | null): Landmark | null => {
   return point;
 };
 
-const normalizePoint = (point: Landmark | null) => {
-  if (!point) return null;
-  const x = point.x <= 2 ? point.x : point.x / 1024;
-  const y = point.y <= 2 ? point.y : point.y / 1024;
-  return {
+const estimateFaceDirection = (
+  points: NormalizedPoint[],
+  stats: LandmarkStats
+): 1 | -1 => {
+  const nose = pointAtNormalized(points, 1);
+  if (!nose) return 1;
+  return nose.x >= stats.cx ? 1 : -1;
+};
+
+const heuristicsForPoint = (
+  definition: LandmarkCalibrationDef,
+  points: NormalizedPoint[]
+): NormalizedPoint | null => {
+  const stats = statsFor(points);
+  if (!stats) return null;
+
+  const dir = estimateFaceDirection(points, stats);
+  const frontX = dir > 0 ? stats.maxX : stats.minX;
+  const backX = dir > 0 ? stats.minX : stats.maxX;
+  const seed = (x: number, y: number, visibility = 0.55): NormalizedPoint => ({
     x: clamp01(x),
     y: clamp01(y),
-    visibility:
-      point.visibility == null || !Number.isFinite(point.visibility)
-        ? 1
-        : clamp01(point.visibility),
-  };
+    visibility: clamp01(visibility),
+  });
+
+  if (definition.view === "front") {
+    switch (definition.id) {
+      case "trichion":
+        return seed(stats.cx, stats.minY + stats.height * 0.05, 0.5);
+      case "forehead":
+        return seed(stats.cx, stats.minY + stats.height * 0.12, 0.56);
+      default:
+        return null;
+    }
+  }
+
+  switch (definition.id) {
+    case "vertex":
+      return seed(stats.cx, stats.minY - stats.height * 0.08, 0.5);
+    case "occiput":
+      return seed(backX - dir * stats.width * 0.08, stats.minY + stats.height * 0.18, 0.48);
+    case "side_trichion":
+      return seed(frontX - dir * stats.width * 0.05, stats.minY + stats.height * 0.08, 0.52);
+    case "intertragic_notch":
+      return seed(backX + dir * stats.width * 0.09, stats.cy + stats.height * 0.06, 0.5);
+    case "neck_point":
+      return seed(backX + dir * stats.width * 0.2, stats.maxY + stats.height * 0.1, 0.5);
+    case "porion":
+      return seed(backX + dir * stats.width * 0.1, stats.minY + stats.height * 0.34, 0.48);
+    case "tragus":
+      return seed(backX + dir * stats.width * 0.08, stats.cy, 0.48);
+    default:
+      return null;
+  }
 };
 
 const initConfidence = (
@@ -109,6 +207,7 @@ const FRONT_REGISTRY: LandmarkCalibrationDef[] = [
     forceManual: true,
     hairSensitive: true,
     assetKey: "forehead",
+    referenceFallbackKeys: ["trichion"],
   },
   {
     id: "forehead",
@@ -480,6 +579,7 @@ const FRONT_REGISTRY: LandmarkCalibrationDef[] = [
     mediapipeIndex: 13,
     required: false,
     assetKey: "cupidsBow",
+    referenceFallbackKeys: ["labraleSuperius"],
   },
   {
     id: "labrale_inferius",
@@ -490,6 +590,7 @@ const FRONT_REGISTRY: LandmarkCalibrationDef[] = [
     mediapipeIndex: 14,
     required: true,
     assetKey: "lowerLip",
+    referenceFallbackKeys: ["labraleInferius"],
   },
   {
     id: "lower_lip",
@@ -580,6 +681,7 @@ const FRONT_REGISTRY: LandmarkCalibrationDef[] = [
     mediapipeIndex: 152,
     required: true,
     assetKey: "chinBottom",
+    referenceFallbackKeys: ["menton"],
   },
   {
     id: "left_cheek",
@@ -968,11 +1070,15 @@ export const getReferenceSources = (
 ) => {
   const gender = normalizeProfileToken(profile.gender, "male");
   const ethnicity = normalizeProfileToken(profile.ethnicity, "white");
-  const localViewScoped = `/landmarks/${gender}/${ethnicity}/${definition.view}/${definition.assetKey}.webp`;
-  const localLegacy = `/landmarks/${gender}/${ethnicity}/${definition.assetKey}.webp`;
-  const remote = `https://beta.faceiqlabs.com/images/landmarks/${gender}/${ethnicity}/${definition.assetKey}.webp?v=1`;
+  const keys = [definition.assetKey, ...(definition.referenceFallbackKeys ?? [])];
+  const sources: string[] = [];
+  for (const key of keys) {
+    sources.push(`/landmarks/${gender}/${ethnicity}/${definition.view}/${key}.webp`);
+    sources.push(`/landmarks/${gender}/${ethnicity}/${key}.webp`);
+    sources.push(`https://beta.faceiqlabs.com/images/landmarks/${gender}/${ethnicity}/${key}.webp?v=1`);
+  }
   return {
-    sources: dedupe([localViewScoped, localLegacy, remote]),
+    sources: dedupe(sources),
   };
 };
 
@@ -997,12 +1103,18 @@ export const initManualLandmarks = ({
   sideQuality,
 }: InitArgs): ManualLandmarkPoint[] => {
   const sideEnabled = isSideCalibrationEnabled(sideQuality);
+  const frontNorm = normalizeLandmarkArray(frontLandmarks);
+  const sideNorm = normalizeLandmarkArray(sideLandmarks);
 
   return LANDMARK_CALIBRATION_REGISTRY.map((definition) => {
-    const viewLandmarks = definition.view === "front" ? frontLandmarks : sideLandmarks;
+    const viewLandmarks = definition.view === "front" ? frontNorm : sideNorm;
     const quality = definition.view === "front" ? frontQuality : sideQuality;
-    const rawPoint = normalizePoint(pointAt(viewLandmarks, definition.mediapipeIndex));
+    const detectedPoint = pointAtNormalized(viewLandmarks, definition.mediapipeIndex);
+    const heuristicPoint = detectedPoint ? null : heuristicsForPoint(definition, viewLandmarks);
+    const rawPoint = detectedPoint ?? heuristicPoint;
     const confidenceData = initConfidence(definition, rawPoint, quality);
+    const confidence =
+      !detectedPoint && rawPoint ? Math.min(confidenceData.confidence, 0.62) : confidenceData.confidence;
     const required = definition.view === "side" && !sideEnabled ? false : definition.required;
 
     return {
@@ -1012,10 +1124,11 @@ export const initManualLandmarks = ({
       x: rawPoint?.x ?? 0.5,
       y: rawPoint?.y ?? 0.5,
       source: "auto",
-      confidence: confidenceData.confidence,
+      confidence,
       reasonCodes: dedupe([
         ...quality.reasonCodes,
         ...confidenceData.reasons,
+        ...(!detectedPoint && rawPoint ? ["heuristic_seed"] : []),
         ...(definition.view === "side" && !sideEnabled ? ["side_not_suitable"] : []),
       ]),
       confirmed: false,
