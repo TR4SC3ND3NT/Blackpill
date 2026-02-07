@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:scoring": "tsx --test tests/scoring.test.ts"
+    "test:scoring": "tsx --test tests/scoring.test.ts",
+    "test:pose": "tsx --test tests/pose.test.ts",
+    "test": "npm run test:pose && npm run test:scoring"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^0.10.18",

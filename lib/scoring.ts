@@ -104,6 +104,7 @@ const FRONT_MIRROR_PAIRS: Array<[number, number]> = [
 
 const reasonPenaltyMultiplier = (reasonCodes: ReasonCode[]) => {
   let factor = 1;
+  if (reasonCodes.includes("bad_pose")) factor *= 0.84;
   if (reasonCodes.includes("blur")) factor *= 0.82;
   if (reasonCodes.includes("out_of_frame")) factor *= 0.72;
   if (reasonCodes.includes("occlusion")) factor *= 0.78;
@@ -758,25 +759,6 @@ const evaluateMetric = (metric: MetricDefinition, ctx: ScoreContext): MetricResu
       insufficient: true,
       validityReason: "low_landmark_conf",
       reasonCodes: ["low_landmark_conf"],
-      errorBar: null,
-    };
-  }
-
-  if (metric.view === "front" && !ctx.frontQuality.pose.validFront) {
-    return {
-      id: metric.id,
-      title: metric.title,
-      pillar: metric.pillar,
-      view: metric.view,
-      value: null,
-      score: null,
-      confidence: clamp01(ctx.frontQuality.confidence),
-      baseWeight: metric.baseWeight,
-      usedWeight: 0,
-      scored: false,
-      insufficient: true,
-      validityReason: "bad_pose",
-      reasonCodes: ["bad_pose"],
       errorBar: null,
     };
   }

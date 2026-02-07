@@ -305,6 +305,35 @@ export default function ResultsOverviewPage() {
             </span>
           </div>
           <div className={styles.diagnosticItem}>
+            <span className={styles.diagnosticLabel}>front.pose.selected</span>
+            <span className={styles.diagnosticValue}>
+              {diagnostics.frontQuality?.pose.selectedLabel ?? "--"}
+            </span>
+          </div>
+          <div className={styles.diagnosticItem}>
+            <span className={styles.diagnosticLabel}>front.pose.candidates</span>
+            <span className={styles.diagnosticValue}>
+              {diagnostics.frontQuality?.pose.candidates
+                ?.slice(0, 2)
+                .map(
+                  (candidate) =>
+                    `${candidate.label}: y${candidate.yaw.toFixed(1)} p${candidate.pitch.toFixed(1)} r${candidate.roll.toFixed(1)}`
+                )
+                .join(" | ") ?? "--"}
+            </span>
+          </div>
+          <div className={styles.diagnosticItem}>
+            <span className={styles.diagnosticLabel}>front.pose.matrix</span>
+            <span className={styles.diagnosticValue}>
+              {diagnostics.frontQuality?.pose.matrix
+                ? diagnostics.frontQuality.pose.matrix
+                    .slice(0, 12)
+                    .map((value) => value.toFixed(3))
+                    .join(" ")
+                : "--"}
+            </span>
+          </div>
+          <div className={styles.diagnosticItem}>
             <span className={styles.diagnosticLabel}>front.faceInFrame</span>
             <span className={styles.diagnosticValue}>
               {diagnostics.frontQuality
@@ -364,6 +393,35 @@ export default function ResultsOverviewPage() {
             <span className={styles.diagnosticLabel}>side.reasonCodes</span>
             <span className={styles.diagnosticValue}>
               {formatReasonCodes(diagnostics.sideQuality?.reasonCodes)}
+            </span>
+          </div>
+          <div className={styles.diagnosticItem}>
+            <span className={styles.diagnosticLabel}>side.pose.selected</span>
+            <span className={styles.diagnosticValue}>
+              {diagnostics.sideQuality?.pose.selectedLabel ?? "--"}
+            </span>
+          </div>
+          <div className={styles.diagnosticItem}>
+            <span className={styles.diagnosticLabel}>side.pose.candidates</span>
+            <span className={styles.diagnosticValue}>
+              {diagnostics.sideQuality?.pose.candidates
+                ?.slice(0, 2)
+                .map(
+                  (candidate) =>
+                    `${candidate.label}: y${candidate.yaw.toFixed(1)} p${candidate.pitch.toFixed(1)} r${candidate.roll.toFixed(1)}`
+                )
+                .join(" | ") ?? "--"}
+            </span>
+          </div>
+          <div className={styles.diagnosticItem}>
+            <span className={styles.diagnosticLabel}>side.pose.matrix</span>
+            <span className={styles.diagnosticValue}>
+              {diagnostics.sideQuality?.pose.matrix
+                ? diagnostics.sideQuality.pose.matrix
+                    .slice(0, 12)
+                    .map((value) => value.toFixed(3))
+                    .join(" ")
+                : "--"}
             </span>
           </div>
           <div className={styles.diagnosticItem}>

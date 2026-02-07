@@ -52,6 +52,9 @@ type UploadDebug = {
   poseRoll?: number;
   poseSource?: PoseEstimate["source"];
   poseConfidence?: number;
+  poseSelectedLabel?: string;
+  poseCandidates?: string;
+  poseMatrix?: string;
   poseValidFront?: boolean;
   poseValidSide?: boolean;
   detectedView?: PhotoQuality["detectedView"];
@@ -246,14 +249,22 @@ const evaluatePhoto = async (
 
   const detectedView = pose.view;
   const viewValid = expectedView === "front" ? pose.validFront : pose.validSide;
+  const absRoll = Math.abs(pose.roll);
 
   if (hasLandmarks && !viewValid) {
     reasonCodes.add("bad_pose");
+    if (expectedView === "side") {
+      reasonCodes.add("side_disabled");
+    }
     if (expectedView === "front") {
       warnings.push("Front photo is not a frontal view.");
     } else {
       warnings.push("Side photo is not a true profile.");
     }
+  }
+
+  if (hasLandmarks && absRoll > 30) {
+    warnings.push("Head is tilted; metrics are roll-corrected.");
   }
 
   if (hasLandmarks) {
@@ -348,10 +359,12 @@ const buildUploadDebug = async (
     if (label === "side") {
       detection = await detectLandmarksWithBBoxFallback(image.dataUrl, {
         timeoutMs: PREVIEW_STAGE_TIMEOUT_MS,
+        expectedView: "side",
       });
     } else {
       const frontDetection = await detectLandmarks(image.dataUrl, {
         timeoutMs: PREVIEW_STAGE_TIMEOUT_MS,
+        expectedView: "front",
       });
       detection = {
         landmarks: frontDetection.landmarks,
@@ -387,6 +400,17 @@ const buildUploadDebug = async (
       poseRoll: qualityCheck.quality.poseRoll,
       poseSource: qualityCheck.quality.pose.source,
       poseConfidence: qualityCheck.quality.pose.confidence,
+      poseSelectedLabel: qualityCheck.quality.pose.selectedLabel,
+      poseCandidates: qualityCheck.quality.pose.candidates
+        ?.slice(0, 2)
+        .map(
+          (candidate) =>
+            `${candidate.label}: y${candidate.yaw.toFixed(1)} p${candidate.pitch.toFixed(1)} r${candidate.roll.toFixed(1)}`
+        )
+        .join(" | "),
+      poseMatrix: qualityCheck.quality.pose.matrix
+        ? qualityCheck.quality.pose.matrix.slice(0, 12).map((value) => value.toFixed(3)).join(" ")
+        : undefined,
       poseValidFront: qualityCheck.quality.pose.validFront,
       poseValidSide: qualityCheck.quality.pose.validSide,
       detectedView: qualityCheck.quality.detectedView,
@@ -720,11 +744,13 @@ export default function Home() {
         detectLandmarks(frontImage.dataUrl, {
           signal,
           timeoutMs: stageTimeout,
+          expectedView: "front",
           onStatus: (status) => setPreviewStatus(status),
         }),
         detectLandmarksWithBBoxFallback(sideImage.dataUrl, {
           signal,
           timeoutMs: stageTimeout,
+          expectedView: "side",
           onStatus: (status) => setPreviewStatus(status),
         }),
       ]),
@@ -925,9 +951,11 @@ export default function Home() {
           const [front, side] = await Promise.all([
             detectLandmarks(frontImage.dataUrl, {
               timeoutMs: PREVIEW_STAGE_TIMEOUT_MS,
+              expectedView: "front",
             }),
             detectLandmarksWithBBoxFallback(sideImage.dataUrl, {
               timeoutMs: PREVIEW_STAGE_TIMEOUT_MS,
+              expectedView: "side",
             }),
           ]);
           frontLandmarks = front.landmarks;
@@ -1384,9 +1412,27 @@ export default function Home() {
                             </span>
                           </div>
                           <div className={styles.debugRow}>
+                            <span className={styles.debugLabel}>pose selected</span>
+                            <span className={styles.debugValue}>
+                              {frontDebug?.poseSelectedLabel ?? "--"}
+                            </span>
+                          </div>
+                          <div className={styles.debugRow}>
                             <span className={styles.debugLabel}>pose conf</span>
                             <span className={styles.debugValue}>
                               {formatNumber(frontDebug?.poseConfidence, 2)}
+                            </span>
+                          </div>
+                          <div className={styles.debugRow}>
+                            <span className={styles.debugLabel}>pose candidates</span>
+                            <span className={styles.debugMono}>
+                              {frontDebug?.poseCandidates ?? "--"}
+                            </span>
+                          </div>
+                          <div className={styles.debugRow}>
+                            <span className={styles.debugLabel}>pose matrix</span>
+                            <span className={styles.debugMono}>
+                              {frontDebug?.poseMatrix ?? "--"}
                             </span>
                           </div>
                           <div className={styles.debugRow}>
@@ -1537,9 +1583,27 @@ export default function Home() {
                             </span>
                           </div>
                           <div className={styles.debugRow}>
+                            <span className={styles.debugLabel}>pose selected</span>
+                            <span className={styles.debugValue}>
+                              {sideDebug?.poseSelectedLabel ?? "--"}
+                            </span>
+                          </div>
+                          <div className={styles.debugRow}>
                             <span className={styles.debugLabel}>pose conf</span>
                             <span className={styles.debugValue}>
                               {formatNumber(sideDebug?.poseConfidence, 2)}
+                            </span>
+                          </div>
+                          <div className={styles.debugRow}>
+                            <span className={styles.debugLabel}>pose candidates</span>
+                            <span className={styles.debugMono}>
+                              {sideDebug?.poseCandidates ?? "--"}
+                            </span>
+                          </div>
+                          <div className={styles.debugRow}>
+                            <span className={styles.debugLabel}>pose matrix</span>
+                            <span className={styles.debugMono}>
+                              {sideDebug?.poseMatrix ?? "--"}
                             </span>
                           </div>
                           <div className={styles.debugRow}>
@@ -1745,6 +1809,18 @@ export default function Home() {
                           </span>
                         </div>
                         <div className={styles.debugRow}>
+                          <span className={styles.debugLabel}>pose source</span>
+                          <span className={styles.debugValue}>
+                            {previewData.frontPose.source}
+                          </span>
+                        </div>
+                        <div className={styles.debugRow}>
+                          <span className={styles.debugLabel}>pose selected</span>
+                          <span className={styles.debugValue}>
+                            {previewData.frontPose.selectedLabel ?? "--"}
+                          </span>
+                        </div>
+                        <div className={styles.debugRow}>
                           <span className={styles.debugLabel}>confidence</span>
                           <span className={styles.debugValue}>
                             {formatNumber(previewData.frontQuality.confidence, 2)}
@@ -1766,6 +1842,18 @@ export default function Home() {
                           <span className={styles.debugLabel}>reason codes</span>
                           <span className={styles.debugMono}>
                             {formatReasonCodes(previewData.frontQuality.reasonCodes)}
+                          </span>
+                        </div>
+                        <div className={styles.debugRow}>
+                          <span className={styles.debugLabel}>pose candidates</span>
+                          <span className={styles.debugMono}>
+                            {previewData.frontPose.candidates
+                              ?.slice(0, 2)
+                              .map(
+                                (candidate) =>
+                                  `${candidate.label}: y${candidate.yaw.toFixed(1)} p${candidate.pitch.toFixed(1)} r${candidate.roll.toFixed(1)}`
+                              )
+                              .join(" | ") ?? "--"}
                           </span>
                         </div>
                       </div>
@@ -1839,6 +1927,18 @@ export default function Home() {
                           </span>
                         </div>
                         <div className={styles.debugRow}>
+                          <span className={styles.debugLabel}>pose source</span>
+                          <span className={styles.debugValue}>
+                            {previewData.sidePose.source}
+                          </span>
+                        </div>
+                        <div className={styles.debugRow}>
+                          <span className={styles.debugLabel}>pose selected</span>
+                          <span className={styles.debugValue}>
+                            {previewData.sidePose.selectedLabel ?? "--"}
+                          </span>
+                        </div>
+                        <div className={styles.debugRow}>
                           <span className={styles.debugLabel}>confidence</span>
                           <span className={styles.debugValue}>
                             {formatNumber(previewData.sideQuality.confidence, 2)}
@@ -1860,6 +1960,18 @@ export default function Home() {
                           <span className={styles.debugLabel}>reason codes</span>
                           <span className={styles.debugMono}>
                             {formatReasonCodes(previewData.sideQuality.reasonCodes)}
+                          </span>
+                        </div>
+                        <div className={styles.debugRow}>
+                          <span className={styles.debugLabel}>pose candidates</span>
+                          <span className={styles.debugMono}>
+                            {previewData.sidePose.candidates
+                              ?.slice(0, 2)
+                              .map(
+                                (candidate) =>
+                                  `${candidate.label}: y${candidate.yaw.toFixed(1)} p${candidate.pitch.toFixed(1)} r${candidate.roll.toFixed(1)}`
+                              )
+                              .join(" | ") ?? "--"}
                           </span>
                         </div>
                       </div>

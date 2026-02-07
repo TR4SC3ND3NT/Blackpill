@@ -26,6 +26,14 @@ export type PoseEstimate = {
   view: ViewLabel;
   validFront: boolean;
   validSide: boolean;
+  selectedLabel?: string;
+  candidates?: Array<{
+    label: string;
+    yaw: number;
+    pitch: number;
+    roll: number;
+    score: number;
+  }>;
 };
 
 export type PhotoQuality = {

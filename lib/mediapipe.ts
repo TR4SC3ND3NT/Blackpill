@@ -72,6 +72,7 @@ type DetectionRuntimeOptions = {
   signal?: AbortSignal;
   timeoutMs?: number;
   onStatus?: MediapipeStatusReporter;
+  expectedView?: "front" | "side";
 };
 
 const REMOTE_WASM_URL =
@@ -237,8 +238,9 @@ const mapLoadError = (error: unknown, stage: string) => {
   );
 };
 
-const FRONT_VALID_LIMITS = { yaw: 10, pitch: 10, roll: 7 };
-const SIDE_VALID_LIMITS = { yawMin: 70, pitch: 12, roll: 10 };
+const FRONT_VALID_LIMITS = { yaw: 20, pitch: 20 };
+const SIDE_VALID_LIMITS = { yawMin: 55, pitch: 20 };
+const ROLL_WARNING_LIMIT = 30;
 
 const classifyViewFromYaw = (yaw: number): PoseEstimate["view"] => {
   const absYaw = Math.abs(yaw);
@@ -253,11 +255,12 @@ const withPoseValidity = (
   roll: number,
   source: PoseEstimate["source"],
   matrix: number[] | null,
-  confidence: number
+  confidence: number,
+  selectedLabel?: string,
+  candidates?: PoseEstimate["candidates"]
 ): PoseEstimate => {
   const absYaw = Math.abs(yaw);
   const absPitch = Math.abs(pitch);
-  const absRoll = Math.abs(roll);
   return {
     yaw,
     pitch,
@@ -266,14 +269,10 @@ const withPoseValidity = (
     matrix,
     confidence: clamp01(confidence),
     view: classifyViewFromYaw(yaw),
-    validFront:
-      absYaw <= FRONT_VALID_LIMITS.yaw &&
-      absPitch <= FRONT_VALID_LIMITS.pitch &&
-      absRoll <= FRONT_VALID_LIMITS.roll,
-    validSide:
-      absYaw >= SIDE_VALID_LIMITS.yawMin &&
-      absPitch <= SIDE_VALID_LIMITS.pitch &&
-      absRoll <= SIDE_VALID_LIMITS.roll,
+    validFront: absYaw <= FRONT_VALID_LIMITS.yaw && absPitch <= FRONT_VALID_LIMITS.pitch,
+    validSide: absYaw >= SIDE_VALID_LIMITS.yawMin && absPitch <= SIDE_VALID_LIMITS.pitch,
+    selectedLabel,
+    candidates,
   };
 };
 
@@ -291,41 +290,182 @@ const parseMatrix = (matrixLike: unknown): number[] | null => {
   return matrix.slice(0, 16);
 };
 
-const matrixToEuler = (matrix: number[]) => {
-  const r00 = matrix[0];
-  const r01 = matrix[1];
-  const r02 = matrix[2];
-  const r10 = matrix[4];
-  const r11 = matrix[5];
-  const r12 = matrix[6];
-  const r20 = matrix[8];
-  const r21 = matrix[9];
-  const r22 = matrix[10];
+type Rotation3 = {
+  r00: number;
+  r01: number;
+  r02: number;
+  r10: number;
+  r11: number;
+  r12: number;
+  r20: number;
+  r21: number;
+  r22: number;
+};
 
-  const sy = Math.sqrt(r00 * r00 + r10 * r10);
-  const singular = sy < 1e-6;
+type PoseCandidate = {
+  label: string;
+  yaw: number;
+  pitch: number;
+  roll: number;
+  score: number;
+};
 
-  let roll = 0;
-  let pitch = 0;
-  let yaw = 0;
+const buildRotationRowMajor = (matrix: number[]): Rotation3 => ({
+  r00: matrix[0],
+  r01: matrix[1],
+  r02: matrix[2],
+  r10: matrix[4],
+  r11: matrix[5],
+  r12: matrix[6],
+  r20: matrix[8],
+  r21: matrix[9],
+  r22: matrix[10],
+});
 
-  if (!singular) {
-    roll = Math.atan2(r21, r22);
-    pitch = Math.atan2(-r20, sy);
-    yaw = Math.atan2(r10, r00);
-  } else {
-    roll = Math.atan2(-r12, r11);
-    pitch = Math.atan2(-r20, sy);
-    yaw = 0;
+const buildRotationColumnMajor = (matrix: number[]): Rotation3 => ({
+  r00: matrix[0],
+  r01: matrix[4],
+  r02: matrix[8],
+  r10: matrix[1],
+  r11: matrix[5],
+  r12: matrix[9],
+  r20: matrix[2],
+  r21: matrix[6],
+  r22: matrix[10],
+});
+
+const transposeRotation = (rotation: Rotation3): Rotation3 => ({
+  r00: rotation.r00,
+  r01: rotation.r10,
+  r02: rotation.r20,
+  r10: rotation.r01,
+  r11: rotation.r11,
+  r12: rotation.r21,
+  r20: rotation.r02,
+  r21: rotation.r12,
+  r22: rotation.r22,
+});
+
+const normalizeVector = (x: number, y: number, z: number) => {
+  const length = Math.hypot(x, y, z);
+  if (!length || !Number.isFinite(length)) {
+    return { x: 0, y: 0, z: 1, length: 0 };
   }
+  return {
+    x: x / length,
+    y: y / length,
+    z: z / length,
+    length,
+  };
+};
+
+const radToDeg = (value: number) => (value * 180) / Math.PI;
+
+const poseFromRotation = (rotation: Rotation3) => {
+  const forward = normalizeVector(rotation.r02, rotation.r12, rotation.r22);
+  const up = normalizeVector(rotation.r01, rotation.r11, rotation.r21);
+
+  const yaw = radToDeg(Math.atan2(forward.x, forward.z));
+  const pitch = radToDeg(Math.atan2(-forward.y, Math.hypot(forward.x, forward.z)));
+  const roll = radToDeg(Math.atan2(up.x, up.y));
+
+  const orthogonality =
+    Math.abs(rotation.r00 * rotation.r01 + rotation.r10 * rotation.r11 + rotation.r20 * rotation.r21) +
+    Math.abs(rotation.r00 * rotation.r02 + rotation.r10 * rotation.r12 + rotation.r20 * rotation.r22) +
+    Math.abs(rotation.r01 * rotation.r02 + rotation.r11 * rotation.r12 + rotation.r21 * rotation.r22);
 
   return {
-    yaw: (yaw * 180) / Math.PI,
-    pitch: (pitch * 180) / Math.PI,
-    roll: (roll * 180) / Math.PI,
-    matrixOrthonormality: Math.abs(r00 * r01 + r10 * r11 + r20 * r21),
-    forwardMagnitude: Math.sqrt(r02 * r02 + r12 * r12 + r22 * r22),
+    yaw,
+    pitch,
+    roll,
+    orthogonality,
+    forwardMagnitude: forward.length,
   };
+};
+
+const clipAngle = (value: number) => {
+  if (!Number.isFinite(value)) return 0;
+  if (value > 180) return ((value + 180) % 360) - 180;
+  if (value < -180) return ((value - 180) % 360) + 180;
+  return value;
+};
+
+const scorePoseCandidate = (
+  candidate: { yaw: number; pitch: number; roll: number },
+  fallback: PoseEstimate,
+  expectedView?: "front" | "side"
+) => {
+  const absYaw = Math.abs(candidate.yaw);
+  const absPitch = Math.abs(candidate.pitch);
+  const absRoll = Math.abs(candidate.roll);
+
+  let score = 0;
+  score -= Math.max(0, absPitch - 65) * 2.4;
+  score -= Math.max(0, absYaw - 95) * 1.8;
+  score -= Math.max(0, absRoll - 120) * 0.8;
+  score -= Math.max(0, absRoll - ROLL_WARNING_LIMIT) * 0.12;
+
+  const fallbackAbsYaw = Math.abs(fallback.yaw);
+  const fallbackAbsPitch = Math.abs(fallback.pitch);
+  score -= Math.abs(absYaw - fallbackAbsYaw) * 0.32;
+  score -= Math.abs(absPitch - fallbackAbsPitch) * 0.26;
+
+  if (expectedView === "front") {
+    score += absYaw <= FRONT_VALID_LIMITS.yaw ? 42 : 0;
+    score += absPitch <= FRONT_VALID_LIMITS.pitch ? 28 : 0;
+    score -= Math.max(0, absYaw - FRONT_VALID_LIMITS.yaw) * 1.3;
+    score -= Math.max(0, absPitch - FRONT_VALID_LIMITS.pitch) * 1.1;
+  } else if (expectedView === "side") {
+    score += absYaw >= SIDE_VALID_LIMITS.yawMin ? 44 : -24;
+    score += absPitch <= SIDE_VALID_LIMITS.pitch ? 26 : -18;
+    score -= Math.abs(absYaw - 78) * 0.75;
+    score -= Math.max(0, absPitch - SIDE_VALID_LIMITS.pitch) * 1.45;
+  } else {
+    score -= Math.abs(absPitch) * 0.25;
+  }
+
+  return score;
+};
+
+export const extractPoseCandidatesFromMatrix = (
+  matrix: number[],
+  fallback: PoseEstimate,
+  expectedView?: "front" | "side"
+) => {
+  const candidatesInput = [
+    { label: "row-major", rotation: buildRotationRowMajor(matrix) },
+    { label: "row-major-inverse", rotation: transposeRotation(buildRotationRowMajor(matrix)) },
+    { label: "column-major", rotation: buildRotationColumnMajor(matrix) },
+    {
+      label: "column-major-inverse",
+      rotation: transposeRotation(buildRotationColumnMajor(matrix)),
+    },
+  ];
+
+  const candidates: PoseCandidate[] = candidatesInput
+    .map(({ label, rotation }) => {
+      const candidate = poseFromRotation(rotation);
+      if (![candidate.yaw, candidate.pitch, candidate.roll].every(Number.isFinite)) {
+        return null;
+      }
+      const yaw = clipAngle(candidate.yaw);
+      const pitch = clipAngle(candidate.pitch);
+      const roll = clipAngle(candidate.roll);
+      const score =
+        scorePoseCandidate({ yaw, pitch, roll }, fallback, expectedView) -
+        candidate.orthogonality * 90;
+      return {
+        label,
+        yaw,
+        pitch,
+        roll,
+        score,
+      };
+    })
+    .filter((candidate): candidate is PoseCandidate => candidate != null)
+    .sort((a, b) => b.score - a.score);
+
+  return candidates;
 };
 
 const fallbackPoseFromPoints = (points: RawLandmark[]): PoseEstimate => {
@@ -362,19 +502,45 @@ const fallbackPoseFromPoints = (points: RawLandmark[]): PoseEstimate => {
     )
   );
 
-  return withPoseValidity(yaw, pitch, roll, "fallback", null, 0.45);
+  return withPoseValidity(yaw, pitch, roll, "fallback", null, 0.45, "fallback");
+};
+
+export const resolvePoseFromMatrix = (
+  matrixLike: unknown,
+  fallback: PoseEstimate,
+  expectedView?: "front" | "side"
+): PoseEstimate => {
+  const matrix = parseMatrix(matrixLike);
+  if (!matrix) return fallback;
+
+  const candidates = extractPoseCandidatesFromMatrix(matrix, fallback, expectedView);
+  const best = candidates[0];
+  if (!best) return fallback;
+
+  const confidence = clamp01(
+    0.62 +
+      (best.score >= 0 ? Math.min(best.score / 180, 0.28) : Math.max(best.score / 220, -0.34))
+  );
+
+  return withPoseValidity(
+    best.yaw,
+    best.pitch,
+    best.roll,
+    "matrix",
+    matrix,
+    confidence,
+    best.label,
+    candidates.slice(0, 4)
+  );
 };
 
 const extractPoseFromDetection = (
   matrixLike: unknown,
-  points: RawLandmark[]
+  points: RawLandmark[],
+  expectedView?: "front" | "side"
 ): PoseEstimate => {
-  const matrix = parseMatrix(matrixLike);
-  if (!matrix) return fallbackPoseFromPoints(points);
-  const { yaw, pitch, roll, matrixOrthonormality, forwardMagnitude } = matrixToEuler(matrix);
-  const confidence = clamp01(1 - matrixOrthonormality * 2) * clamp01(forwardMagnitude);
-  if (![yaw, pitch, roll].every(Number.isFinite)) return fallbackPoseFromPoints(points);
-  return withPoseValidity(yaw, pitch, roll, "matrix", matrix, confidence);
+  const fallback = fallbackPoseFromPoints(points);
+  return resolvePoseFromMatrix(matrixLike, fallback, expectedView);
 };
 
 const getVision = async () => {
@@ -613,7 +779,7 @@ const detectOnSource = async (
   const matrixLike = result.facialTransformationMatrixes?.[0];
   return {
     points,
-    pose: extractPoseFromDetection(matrixLike, points),
+    pose: extractPoseFromDetection(matrixLike, points, options.expectedView),
   };
 };
 
