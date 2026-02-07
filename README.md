@@ -1,13 +1,27 @@
 # Blackpill (MVP)
 
-## Run Locally
+## Install
 
 ```bash
 npm install
+```
+
+## Run Locally
+
+```bash
 npm run dev
 ```
 
 Open `http://localhost:3000`.
+
+## MediaPipe Assets
+
+By default the app tries local assets first and falls back to CDN/model URLs.
+
+- Local wasm path: `public/mediapipe/wasm`
+- Local models path: `public/mediapipe/models`
+
+If local assets are missing, internet access is required to load MediaPipe runtime/models.
 
 ## Optional Persistence
 

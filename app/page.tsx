@@ -11,6 +11,7 @@ import styles from "./page.module.css";
 import {
   detectLandmarks,
   detectLandmarksWithBBoxFallback,
+  warmupMediapipe,
   loadImageFromDataUrl,
 } from "@/lib/mediapipe";
 import { fetchJson, wait } from "@/lib/api";
@@ -192,6 +193,7 @@ const computeBlurVariance = async (dataUrl: string) => {
 
 const MIN_SIDE_PX = 600;
 const BLUR_THRESHOLD = 40;
+const PREVIEW_STAGE_TIMEOUT_MS = 20_000;
 
 const evaluatePhoto = async (
   label: string,
@@ -319,9 +321,13 @@ const buildUploadDebug = async (
       scaleApplied: number;
     };
     if (label === "side") {
-      detection = await detectLandmarksWithBBoxFallback(image.dataUrl);
+      detection = await detectLandmarksWithBBoxFallback(image.dataUrl, {
+        timeoutMs: PREVIEW_STAGE_TIMEOUT_MS,
+      });
     } else {
-      const frontLandmarks = await detectLandmarks(image.dataUrl);
+      const frontLandmarks = await detectLandmarks(image.dataUrl, {
+        timeoutMs: PREVIEW_STAGE_TIMEOUT_MS,
+      });
       detection = {
         landmarks: frontLandmarks,
         method: frontLandmarks.length ? "normal" : "failed",
@@ -361,6 +367,64 @@ const buildUploadDebug = async (
 };
 
 const mergeIssues = (items: string[]) => Array.from(new Set(items.filter(Boolean)));
+
+const isAbortError = (error: unknown) =>
+  error instanceof Error && error.name === "AbortError";
+
+const withTimeout = async <T,>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  label: string
+) =>
+  new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`${label} exceeded ${timeoutMs / 1000}s timeout.`));
+    }, timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
+
+const withAbort = async <T,>(promise: Promise<T>, signal?: AbortSignal) => {
+  if (!signal) return promise;
+  if (signal.aborted) {
+    const error = new Error("Operation aborted.");
+    error.name = "AbortError";
+    throw error;
+  }
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      const error = new Error("Operation aborted.");
+      error.name = "AbortError";
+      reject(error);
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      }
+    );
+  });
+};
+
+const withAbortAndTimeout = async <T,>(
+  promise: Promise<T>,
+  signal: AbortSignal | undefined,
+  timeoutMs: number,
+  label: string
+) => withAbort(withTimeout(promise, timeoutMs, label), signal);
 
 const LandmarkPreviewImage = ({
   image,
@@ -416,8 +480,13 @@ export default function Home() {
   const [previewData, setPreviewData] = useState<LandmarkPreviewData | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewStatus, setPreviewStatus] = useState<string | null>(null);
+  const [warmupStatus, setWarmupStatus] = useState<string | null>(null);
+  const [warmupError, setWarmupError] = useState<string | null>(null);
   const inFlightRef = useRef(false);
   const hasRunRef = useRef(false);
+  const previewRequestKeyRef = useRef<string | null>(null);
+  const warmupTriggeredRef = useRef(false);
 
   const stepItems = useMemo(
     () => [
@@ -480,6 +549,11 @@ export default function Home() {
     setError(null);
     setPreviewError(null);
     setPreviewData(null);
+    setPreviewStatus(null);
+    setWarmupError(null);
+    setWarmupStatus(null);
+    warmupTriggeredRef.current = false;
+    previewRequestKeyRef.current = null;
     try {
       const processed = await compressImage(file);
       setter(processed);
@@ -491,6 +565,8 @@ export default function Home() {
   useEffect(() => {
     setPreviewData(null);
     setPreviewError(null);
+    setPreviewStatus(null);
+    previewRequestKeyRef.current = null;
   }, [frontImage?.dataUrl, sideImage?.dataUrl]);
 
   useEffect(() => {
@@ -531,17 +607,97 @@ export default function Home() {
     };
   }, [sideImage, step]);
 
-  const prepareLandmarkPreview = useCallback(async (): Promise<LandmarkPreviewData> => {
+  useEffect(() => {
+    if (!frontImage || !sideImage) return;
+    if (!consent && step < 3) return;
+    if (warmupTriggeredRef.current) return;
+
+    let active = true;
+    const controller = new AbortController();
+    warmupTriggeredRef.current = true;
+    setWarmupError(null);
+    setWarmupStatus("Loading WASM...");
+
+    const timerLabel = `[preview] warmup-${Date.now()}`;
+    console.time(timerLabel);
+    withAbortAndTimeout(
+      warmupMediapipe({
+        timeoutMs: PREVIEW_STAGE_TIMEOUT_MS,
+        signal: controller.signal,
+        onStatus: (status) => {
+          if (!active) return;
+          setWarmupStatus(status);
+        },
+      }),
+      controller.signal,
+      PREVIEW_STAGE_TIMEOUT_MS,
+      "MediaPipe warmup"
+    )
+      .then(() => {
+        if (!active) return;
+        setWarmupStatus("MediaPipe ready.");
+      })
+      .catch((reason) => {
+        if (!active || isAbortError(reason)) return;
+        const message =
+          reason instanceof Error
+            ? reason.message
+            : "Could not load MediaPipe runtime/models.";
+        setWarmupError(message);
+        setWarmupStatus(null);
+        warmupTriggeredRef.current = false;
+      })
+      .finally(() => {
+        console.timeEnd(timerLabel);
+      });
+
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [frontImage, sideImage, consent, step]);
+
+  const prepareLandmarkPreview = useCallback(async (
+    signal?: AbortSignal
+  ): Promise<LandmarkPreviewData> => {
     if (!frontImage || !sideImage) {
       throw new Error("Please upload both photos.");
     }
 
-    const [front, sideDetection] = await Promise.all([
-      detectLandmarks(frontImage.dataUrl),
-      detectLandmarksWithBBoxFallback(sideImage.dataUrl),
-    ]);
+    const stageTimeout = PREVIEW_STAGE_TIMEOUT_MS;
+    setPreviewStatus("Loading WASM...");
+    await withAbortAndTimeout(
+      warmupMediapipe({
+        timeoutMs: stageTimeout,
+        signal,
+        onStatus: (status) => setPreviewStatus(status),
+      }),
+      signal,
+      stageTimeout,
+      "Preview warmup"
+    );
+
+    setPreviewStatus("Running landmarker...");
+    const [front, sideDetection] = await withAbortAndTimeout(
+      Promise.all([
+        detectLandmarks(frontImage.dataUrl, {
+          signal,
+          timeoutMs: stageTimeout,
+          onStatus: (status) => setPreviewStatus(status),
+        }),
+        detectLandmarksWithBBoxFallback(sideImage.dataUrl, {
+          signal,
+          timeoutMs: stageTimeout,
+          onStatus: (status) => setPreviewStatus(status),
+        }),
+      ]),
+      signal,
+      stageTimeout,
+      "Landmark detection"
+    );
     const side = sideDetection.landmarks;
 
+    setPreviewStatus("Evaluating quality...");
     const [frontCheck, sideCheck] = await Promise.all([
       evaluatePhoto(
         "Front",
@@ -600,20 +756,31 @@ export default function Home() {
   }, [frontImage, sideImage]);
 
   useEffect(() => {
-    let active = true;
     if (step !== 4 || !frontImage || !sideImage) {
       return undefined;
     }
-    if (previewData || previewLoading || previewError) {
+
+    const requestKey = `${frontImage.dataUrl.slice(0, 32)}:${frontImage.dataUrl.length}|${sideImage.dataUrl.slice(0, 32)}:${sideImage.dataUrl.length}`;
+    if (previewRequestKeyRef.current === requestKey) {
       return undefined;
     }
 
+    let active = true;
+    const controller = new AbortController();
+    previewRequestKeyRef.current = requestKey;
     setPreviewLoading(true);
+    setPreviewError(null);
     setError(null);
-    prepareLandmarkPreview()
+    setPreviewStatus("Loading WASM...");
+
+    const timerLabel = `[preview] detect-${Date.now()}`;
+    console.time(timerLabel);
+
+    prepareLandmarkPreview(controller.signal)
       .then((result) => {
         if (!active) return;
         setPreviewData(result);
+        setPreviewStatus("Preview ready.");
         if (result.sideWarning) {
           setError(result.sideWarning);
         } else if (result.warnings.length) {
@@ -621,28 +788,27 @@ export default function Home() {
         }
       })
       .catch((reason) => {
-        if (!active) return;
+        if (!active || isAbortError(reason)) return;
         const message =
           reason instanceof Error ? reason.message : "Landmark preview failed.";
         setPreviewError(message);
         setError(message);
+        setPreviewStatus(null);
       })
       .finally(() => {
-        if (active) setPreviewLoading(false);
+        console.timeEnd(timerLabel);
+        if (active) {
+          setPreviewLoading(false);
+        }
       });
 
     return () => {
       active = false;
+      controller.abort();
+      setPreviewLoading(false);
+      setPreviewStatus(null);
     };
-  }, [
-    step,
-    frontImage,
-    sideImage,
-    previewData,
-    previewLoading,
-    previewError,
-    prepareLandmarkPreview,
-  ]);
+  }, [step, frontImage, sideImage, prepareLandmarkPreview]);
 
   const runPipeline = useCallback(async () => {
     if (!frontImage || !sideImage) return;
@@ -693,8 +859,12 @@ export default function Home() {
           }
         } else {
           const [front, side] = await Promise.all([
-            detectLandmarks(frontImage.dataUrl),
-            detectLandmarksWithBBoxFallback(sideImage.dataUrl),
+            detectLandmarks(frontImage.dataUrl, {
+              timeoutMs: PREVIEW_STAGE_TIMEOUT_MS,
+            }),
+            detectLandmarksWithBBoxFallback(sideImage.dataUrl, {
+              timeoutMs: PREVIEW_STAGE_TIMEOUT_MS,
+            }),
           ]);
           frontLandmarks = front;
           sideLandmarks = side.landmarks;
@@ -1349,6 +1519,8 @@ export default function Home() {
                       }
                       setPreviewError(null);
                       setPreviewData(null);
+                      setPreviewStatus(null);
+                      previewRequestKeyRef.current = null;
                       setError(null);
                       setStep(4);
                     }}
@@ -1356,6 +1528,10 @@ export default function Home() {
                     Preview Landmarks
                   </Button>
                 </div>
+                {warmupStatus ? (
+                  <div className={styles.hint}>MediaPipe warmup: {warmupStatus}</div>
+                ) : null}
+                {warmupError ? <div className={styles.error}>{warmupError}</div> : null}
               </Card>
             </motion.div>
           ) : null}
@@ -1459,9 +1635,10 @@ export default function Home() {
                   </div>
                 ) : null}
 
-                {previewLoading ? (
-                  <div className={styles.note}>Detecting landmarks for preview...</div>
+                {previewStatus ? (
+                  <div className={styles.note}>Status: {previewStatus}</div>
                 ) : null}
+                {previewLoading ? <div className={styles.note}>Preparing preview...</div> : null}
                 {previewError ? <div className={styles.error}>{previewError}</div> : null}
 
                 {error ? <div className={styles.error}>{error}</div> : null}
@@ -1489,6 +1666,8 @@ export default function Home() {
                       onClick={() => {
                         setPreviewError(null);
                         setPreviewData(null);
+                        setPreviewStatus(null);
+                        previewRequestKeyRef.current = null;
                       }}
                     >
                       Retry

@@ -50,11 +50,25 @@ type BBoxAttempt = {
   downscaleLongSide?: 640 | 512;
 };
 
-const WASM_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/wasm";
-const FACE_LANDMARKER_MODEL =
+export type MediapipeStatusReporter = (status: string) => void;
+
+type DetectionRuntimeOptions = {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  onStatus?: MediapipeStatusReporter;
+};
+
+const REMOTE_WASM_URL =
+  "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/wasm";
+const REMOTE_FACE_LANDMARKER_MODEL =
   "https://storage.googleapis.com/mediapipe-assets/face_landmarker.task";
-const FACE_DETECTOR_MODEL =
+const REMOTE_FACE_DETECTOR_MODEL =
   "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite";
+const LOCAL_WASM_URL = "/mediapipe/wasm";
+const LOCAL_FACE_LANDMARKER_MODEL = "/mediapipe/models/face_landmarker.task";
+const LOCAL_FACE_DETECTOR_MODEL = "/mediapipe/models/blaze_face_short_range.tflite";
+const DEFAULT_STAGE_TIMEOUT_MS = 20_000;
+const LOCAL_ASSET_PROBE_TIMEOUT_MS = 2_500;
 const FACE_CROP_PADDING_STEPS = [0.3, 0.4, 0.55, 0.75];
 const CROP_LANDMARK_SCALES: Array<640 | 512 | 384> = [640, 512, 384];
 
@@ -72,6 +86,140 @@ let landmarkerPromise:
 let detectorPromise: Promise<import("@mediapipe/tasks-vision").FaceDetector> | null =
   null;
 let detectQueue: Promise<unknown> = Promise.resolve();
+let warmupPromise: Promise<void> | null = null;
+const localAssetPathCache = new Map<string, Promise<string>>();
+
+const toAbortError = () => {
+  const error = new Error("Operation aborted.");
+  error.name = "AbortError";
+  return error;
+};
+
+const reportStatus = (options?: DetectionRuntimeOptions, status?: string) => {
+  if (!status) return;
+  options?.onStatus?.(status);
+};
+
+const throwIfAborted = (signal?: AbortSignal) => {
+  if (!signal?.aborted) return;
+  throw toAbortError();
+};
+
+const withTimeout = async <T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  label: string
+): Promise<T> =>
+  new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${timeoutMs}ms.`));
+    }, timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
+
+const withSignal = async <T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> => {
+  if (!signal) return promise;
+  if (signal.aborted) throw toAbortError();
+
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(toAbortError());
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      }
+    );
+  });
+};
+
+let timerCounter = 0;
+const withTimer = async <T>(label: string, task: () => Promise<T>) => {
+  const timerLabel = `[mediapipe] ${label}#${++timerCounter}`;
+  console.time(timerLabel);
+  try {
+    return await task();
+  } finally {
+    console.timeEnd(timerLabel);
+  }
+};
+
+const probeLocalAsset = async (assetPath: string) => {
+  if (typeof window === "undefined") return false;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), LOCAL_ASSET_PROBE_TIMEOUT_MS);
+  try {
+    const res = await fetch(assetPath, {
+      method: "HEAD",
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    return res.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+const resolveAssetPath = (
+  localPath: string,
+  remotePath: string,
+  probePath: string = localPath
+) => {
+  const key = `${localPath}::${remotePath}::${probePath}`;
+  const cached = localAssetPathCache.get(key);
+  if (cached) return cached;
+
+  const resolver = (async () => {
+    const hasLocal = await probeLocalAsset(probePath);
+    const resolved = hasLocal ? localPath : remotePath;
+    console.info(
+      `[mediapipe] asset ${localPath} -> ${hasLocal ? "local" : "remote fallback"}`
+    );
+    return resolved;
+  })();
+
+  localAssetPathCache.set(key, resolver);
+  return resolver;
+};
+
+const getWasmUrl = () =>
+  resolveAssetPath(
+    LOCAL_WASM_URL,
+    REMOTE_WASM_URL,
+    `${LOCAL_WASM_URL}/vision_wasm_internal.wasm`
+  );
+
+const getLandmarkerModelPath = () =>
+  resolveAssetPath(LOCAL_FACE_LANDMARKER_MODEL, REMOTE_FACE_LANDMARKER_MODEL);
+
+const getDetectorModelPath = () =>
+  resolveAssetPath(LOCAL_FACE_DETECTOR_MODEL, REMOTE_FACE_DETECTOR_MODEL);
+
+const mapLoadError = (error: unknown, stage: string) => {
+  if (error instanceof Error && error.name === "AbortError") {
+    return error;
+  }
+  const message =
+    error instanceof Error ? error.message : `Unknown error while loading ${stage}.`;
+  return new Error(
+    `Failed to load MediaPipe ${stage}. ${message} Check network or local assets in public/mediapipe.`
+  );
+};
 
 const getVision = async () => {
   if (!visionPromise) {
@@ -80,91 +228,189 @@ const getVision = async () => {
   return visionPromise;
 };
 
-const getFileset = async () => {
-  if (filesetPromise) return filesetPromise;
+export const getFileset = async (options: DetectionRuntimeOptions = {}) => {
+  const timeoutMs = options.timeoutMs ?? DEFAULT_STAGE_TIMEOUT_MS;
+  reportStatus(options, "Loading WASM...");
+  throwIfAborted(options.signal);
 
-  filesetPromise = (async () => {
-    const vision = await getVision();
-    return vision.FilesetResolver.forVisionTasks(WASM_URL);
-  })();
-
-  return filesetPromise;
-};
-
-export const getFaceLandmarker = async () => {
-  if (landmarkerPromise) return landmarkerPromise;
-
-  landmarkerPromise = (async () => {
-    const [vision, fileset] = await Promise.all([getVision(), getFileset()]);
-    const fileSetForLandmarker =
-      fileset as Parameters<typeof vision.FaceLandmarker.createFromOptions>[0];
-
-    const create = (delegate: "GPU" | "CPU") =>
-      vision.FaceLandmarker.createFromOptions(fileSetForLandmarker, {
-        baseOptions: {
-          modelAssetPath: FACE_LANDMARKER_MODEL,
-          delegate,
-        },
-        runningMode: "IMAGE",
-        numFaces: 1,
-        minFaceDetectionConfidence: 0.1,
-        minFacePresenceConfidence: 0.1,
-        minTrackingConfidence: 0.1,
-        outputFaceBlendshapes: false,
-        outputFacialTransformationMatrixes: false,
-      });
-
-    try {
-      return await create("GPU");
-    } catch (error) {
-      console.warn("MediaPipe GPU delegate failed, falling back to CPU.", error);
-      return create("CPU");
-    }
-  })();
-
-  return landmarkerPromise;
-};
-
-const getFaceDetector = async () => {
-  if (detectorPromise) return detectorPromise;
-
-  detectorPromise = (async () => {
-    const [vision, fileset] = await Promise.all([getVision(), getFileset()]);
-    const fileSetForDetector =
-      fileset as Parameters<typeof vision.FaceDetector.createFromOptions>[0];
-
-    const create = (delegate: "GPU" | "CPU") =>
-      vision.FaceDetector.createFromOptions(fileSetForDetector, {
-        baseOptions: {
-          modelAssetPath: FACE_DETECTOR_MODEL,
-          delegate,
-        },
-        runningMode: "IMAGE",
-        minDetectionConfidence: 0.2,
-        minSuppressionThreshold: 0.3,
-      });
-
-    try {
-      return await create("GPU");
-    } catch (error) {
-      console.warn(
-        "MediaPipe FaceDetector GPU delegate failed, falling back to CPU.",
-        error
+  if (!filesetPromise) {
+    filesetPromise = (async () => {
+      const [vision, wasmUrl] = await Promise.all([getVision(), getWasmUrl()]);
+      return withTimer("FilesetResolver.forVisionTasks", async () =>
+        vision.FilesetResolver.forVisionTasks(wasmUrl)
       );
-      return create("CPU");
-    }
-  })();
+    })();
+  }
 
-  return detectorPromise;
+  try {
+    const withGuards = withSignal(
+      withTimeout(filesetPromise as Promise<unknown>, timeoutMs, "Loading WASM"),
+      options.signal
+    );
+    return await withGuards;
+  } catch (error) {
+    filesetPromise = null;
+    throw mapLoadError(error, "WASM runtime");
+  }
 };
 
-export const loadImageFromDataUrl = (dataUrl: string) =>
-  new Promise<HTMLImageElement>((resolve, reject) => {
+export const getFaceLandmarker = async (options: DetectionRuntimeOptions = {}) => {
+  const timeoutMs = options.timeoutMs ?? DEFAULT_STAGE_TIMEOUT_MS;
+  reportStatus(options, "Loading models...");
+  throwIfAborted(options.signal);
+
+  if (!landmarkerPromise) {
+    landmarkerPromise = (async () => {
+      const [vision, fileset, modelAssetPath] = await Promise.all([
+        getVision(),
+        getFileset(options),
+        getLandmarkerModelPath(),
+      ]);
+      const fileSetForLandmarker =
+        fileset as Parameters<typeof vision.FaceLandmarker.createFromOptions>[0];
+
+      const create = (delegate: "GPU" | "CPU") =>
+        withTimer(`FaceLandmarker.createFromOptions(${delegate})`, () =>
+          vision.FaceLandmarker.createFromOptions(fileSetForLandmarker, {
+            baseOptions: {
+              modelAssetPath,
+              delegate,
+            },
+            runningMode: "IMAGE",
+            numFaces: 1,
+            minFaceDetectionConfidence: 0.1,
+            minFacePresenceConfidence: 0.1,
+            minTrackingConfidence: 0.1,
+            outputFaceBlendshapes: false,
+            outputFacialTransformationMatrixes: false,
+          })
+        );
+
+      try {
+        return await create("GPU");
+      } catch (error) {
+        console.warn("MediaPipe GPU delegate failed, falling back to CPU.", error);
+        return create("CPU");
+      }
+    })();
+  }
+
+  try {
+    const withGuards = withSignal(
+      withTimeout(
+        landmarkerPromise as Promise<import("@mediapipe/tasks-vision").FaceLandmarker>,
+        timeoutMs,
+        "Loading FaceLandmarker model"
+      ),
+      options.signal
+    );
+    return await withGuards;
+  } catch (error) {
+    landmarkerPromise = null;
+    throw mapLoadError(error, "FaceLandmarker model");
+  }
+};
+
+export const getFaceDetector = async (options: DetectionRuntimeOptions = {}) => {
+  const timeoutMs = options.timeoutMs ?? DEFAULT_STAGE_TIMEOUT_MS;
+  reportStatus(options, "Loading models...");
+  throwIfAborted(options.signal);
+
+  if (!detectorPromise) {
+    detectorPromise = (async () => {
+      const [vision, fileset, modelAssetPath] = await Promise.all([
+        getVision(),
+        getFileset(options),
+        getDetectorModelPath(),
+      ]);
+      const fileSetForDetector =
+        fileset as Parameters<typeof vision.FaceDetector.createFromOptions>[0];
+
+      const create = (delegate: "GPU" | "CPU") =>
+        withTimer(`FaceDetector.createFromOptions(${delegate})`, () =>
+          vision.FaceDetector.createFromOptions(fileSetForDetector, {
+            baseOptions: {
+              modelAssetPath,
+              delegate,
+            },
+            runningMode: "IMAGE",
+            minDetectionConfidence: 0.2,
+            minSuppressionThreshold: 0.3,
+          })
+        );
+
+      try {
+        return await create("GPU");
+      } catch (error) {
+        console.warn(
+          "MediaPipe FaceDetector GPU delegate failed, falling back to CPU.",
+          error
+        );
+        return create("CPU");
+      }
+    })();
+  }
+
+  try {
+    const withGuards = withSignal(
+      withTimeout(
+        detectorPromise as Promise<import("@mediapipe/tasks-vision").FaceDetector>,
+        timeoutMs,
+        "Loading FaceDetector model"
+      ),
+      options.signal
+    );
+    return await withGuards;
+  } catch (error) {
+    detectorPromise = null;
+    throw mapLoadError(error, "FaceDetector model");
+  }
+};
+
+export const warmupMediapipe = async (options: DetectionRuntimeOptions = {}) => {
+  if (!warmupPromise) {
+    warmupPromise = (async () => {
+      console.time("[mediapipe] warmup");
+      try {
+        reportStatus(options, "Loading WASM...");
+        await getFileset(options);
+        reportStatus(options, "Loading models...");
+        await Promise.all([getFaceLandmarker(options), getFaceDetector(options)]);
+        reportStatus(options, "MediaPipe ready.");
+      } finally {
+        console.timeEnd("[mediapipe] warmup");
+      }
+    })();
+  }
+
+  try {
+    await withSignal(
+      withTimeout(warmupPromise, options.timeoutMs ?? DEFAULT_STAGE_TIMEOUT_MS, "Warmup"),
+      options.signal
+    );
+  } catch (error) {
+    warmupPromise = null;
+    throw mapLoadError(error, "warmup");
+  }
+};
+
+export const loadImageFromDataUrl = async (
+  dataUrl: string,
+  options: DetectionRuntimeOptions = {}
+) => {
+  const timeoutMs = options.timeoutMs ?? DEFAULT_STAGE_TIMEOUT_MS;
+  throwIfAborted(options.signal);
+  const imagePromise = new Promise<HTMLImageElement>((resolve, reject) => {
     const img = new Image();
     img.onload = () => resolve(img);
     img.onerror = () => reject(new Error("Failed to load image."));
     img.src = dataUrl;
   });
+  return withSignal(
+    withTimeout(imagePromise, timeoutMs, "Loading image source"),
+    options.signal
+  );
+};
 
 const mapPoints = (
   points: Array<{ x: number; y: number; z?: number; visibility?: number }>
@@ -176,8 +422,18 @@ const mapPoints = (
     visibility: point.visibility,
   }));
 
-const withQueue = async <T>(task: () => Promise<T>) => {
-  const run = detectQueue.then(task, task);
+const withQueue = async <T>(
+  task: () => Promise<T>,
+  options: DetectionRuntimeOptions = {},
+  label = "queued-task"
+) => {
+  const timeoutMs = options.timeoutMs ?? DEFAULT_STAGE_TIMEOUT_MS;
+  const guardedTask = async () => {
+    throwIfAborted(options.signal);
+    const run = task();
+    return withSignal(withTimeout(run, timeoutMs, label), options.signal);
+  };
+  const run = detectQueue.then(guardedTask, guardedTask);
   detectQueue = run.then(
     () => undefined,
     () => undefined
@@ -185,17 +441,33 @@ const withQueue = async <T>(task: () => Promise<T>) => {
   return run;
 };
 
-const detectOnSource = async (source: TexImageSource) => {
-  const landmarker = await getFaceLandmarker();
+const detectOnSource = async (
+  source: TexImageSource,
+  options: DetectionRuntimeOptions = {}
+) => {
+  reportStatus(options, "Running landmarker...");
+  throwIfAborted(options.signal);
+  const landmarker = await getFaceLandmarker(options);
   const input = source as Parameters<typeof landmarker.detect>[0];
-  const result = landmarker.detect(input);
+  const result = await withTimer("FaceLandmarker.detect", async () =>
+    Promise.resolve(landmarker.detect(input))
+  );
+  throwIfAborted(options.signal);
   return result.faceLandmarks?.[0] ?? [];
 };
 
-const detectFacesOnSource = async (source: TexImageSource): Promise<FaceDetectionLike[]> => {
-  const detector = await getFaceDetector();
+const detectFacesOnSource = async (
+  source: TexImageSource,
+  options: DetectionRuntimeOptions = {}
+): Promise<FaceDetectionLike[]> => {
+  reportStatus(options, "Detecting face bbox...");
+  throwIfAborted(options.signal);
+  const detector = await getFaceDetector(options);
   const input = source as Parameters<typeof detector.detect>[0];
-  const result = detector.detect(input);
+  const result = await withTimer("FaceDetector.detect", async () =>
+    Promise.resolve(detector.detect(input))
+  );
+  throwIfAborted(options.signal);
   return (result.detections ?? []) as FaceDetectionLike[];
 };
 
@@ -464,7 +736,10 @@ const mapFromCropToOriginal = (
     };
   });
 
-const detectCropLandmarks = async (cropCanvas: HTMLCanvasElement) => {
+const detectCropLandmarks = async (
+  cropCanvas: HTMLCanvasElement,
+  options: DetectionRuntimeOptions = {}
+) => {
   const candidates: HTMLCanvasElement[] = [cropCanvas];
 
   for (const maxLongSide of CROP_LANDMARK_SCALES) {
@@ -479,7 +754,8 @@ const detectCropLandmarks = async (cropCanvas: HTMLCanvasElement) => {
   }
 
   for (const candidate of candidates) {
-    const direct = await detectOnSource(candidate);
+    throwIfAborted(options.signal);
+    const direct = await detectOnSource(candidate, options);
     if (direct.length) {
       return direct;
     }
@@ -490,7 +766,7 @@ const detectCropLandmarks = async (cropCanvas: HTMLCanvasElement) => {
       candidate.height
     );
     if (flipped) {
-      const flippedPoints = await detectOnSource(flipped);
+      const flippedPoints = await detectOnSource(flipped, options);
       if (flippedPoints.length) {
         return mapFlippedCropPoints(flippedPoints);
       }
@@ -504,7 +780,7 @@ const detectCropLandmarks = async (cropCanvas: HTMLCanvasElement) => {
         deg
       );
       if (!rotated) continue;
-      const rotatedPoints = await detectOnSource(rotated);
+      const rotatedPoints = await detectOnSource(rotated, options);
       if (rotatedPoints.length) {
         return mapFromRotate(rotatedPoints, deg);
       }
@@ -514,18 +790,22 @@ const detectCropLandmarks = async (cropCanvas: HTMLCanvasElement) => {
   return [];
 };
 
-export const detectLandmarks = async (dataUrl: string): Promise<Landmark[]> =>
+export const detectLandmarks = async (
+  dataUrl: string,
+  options: DetectionRuntimeOptions = {}
+): Promise<Landmark[]> =>
   withQueue(async () => {
-    const image = await loadImageFromDataUrl(dataUrl);
-    const points = await detectOnSource(image);
+    const image = await loadImageFromDataUrl(dataUrl, options);
+    const points = await detectOnSource(image, options);
     return mapPoints(points);
-  });
+  }, options, "detectLandmarks");
 
 export const detectLandmarksWithBBoxFallback = async (
-  dataUrl: string
+  dataUrl: string,
+  options: DetectionRuntimeOptions = {}
 ): Promise<LandmarksWithBBoxResult> =>
   withQueue(async () => {
-    const image = await loadImageFromDataUrl(dataUrl);
+    const image = await loadImageFromDataUrl(dataUrl, options);
     const { w: originalWidth, h: originalHeight } = getSize(image);
 
     if (!originalWidth || !originalHeight) {
@@ -542,13 +822,14 @@ export const detectLandmarksWithBBoxFallback = async (
     let lastScaleApplied = 1;
 
     for (const attempt of BBOX_ATTEMPTS) {
+      throwIfAborted(options.signal);
       const scaled = createScaledSource(image, attempt.downscaleLongSide);
       if (!scaled || !scaled.width || !scaled.height) {
         continue;
       }
 
       lastScaleApplied = scaled.scaleApplied;
-      const detections = await detectFacesOnSource(scaled.source);
+      const detections = await detectFacesOnSource(scaled.source, options);
       const bboxOnScaled = pickBestBoundingBox(detections);
       if (!bboxOnScaled) {
         continue;
@@ -575,7 +856,7 @@ export const detectLandmarksWithBBoxFallback = async (
           continue;
         }
 
-        const points = await detectCropLandmarks(cropCanvas);
+        const points = await detectCropLandmarks(cropCanvas, options);
         if (!points.length) {
           continue;
         }
@@ -609,7 +890,7 @@ export const detectLandmarksWithBBoxFallback = async (
       bbox: lastBBox,
       scaleApplied: lastScaleApplied,
     };
-  });
+  }, options, "detectLandmarksWithBBoxFallback");
 
 const createFlippedCanvas = (image: HTMLImageElement) => {
   const { w, h } = getSize(image);
