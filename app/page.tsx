@@ -1221,9 +1221,10 @@ export default function Home() {
                       className={styles.hiddenFileInput}
                       type="file"
                       accept="image/*"
-                      onChange={(event) =>
-                        void handleFile(event.target.files?.[0], setFrontImage)
-                      }
+                      onChange={(event) => {
+                        void handleFile(event.target.files?.[0], setFrontImage);
+                        event.currentTarget.value = "";
+                      }}
                     />
                   </div>
 
@@ -1272,9 +1273,10 @@ export default function Home() {
                       className={styles.hiddenFileInput}
                       type="file"
                       accept="image/*"
-                      onChange={(event) =>
-                        void handleFile(event.target.files?.[0], setSideImage)
-                      }
+                      onChange={(event) => {
+                        void handleFile(event.target.files?.[0], setSideImage);
+                        event.currentTarget.value = "";
+                      }}
                     />
                   </div>
                 </div>
