@@ -15,7 +15,7 @@ import {
   loadImageFromDataUrl,
 } from "@/lib/mediapipe";
 import { fetchJson, wait } from "@/lib/api";
-import type { Landmark, PhotoQuality } from "@/lib/types";
+import type { Landmark, PhotoQuality, PoseEstimate, ReasonCode } from "@/lib/types";
 
 type ImageState = {
   dataUrl: string;
@@ -50,7 +50,14 @@ type UploadDebug = {
   poseYaw?: number;
   posePitch?: number;
   poseRoll?: number;
+  poseSource?: PoseEstimate["source"];
+  poseConfidence?: number;
+  poseValidFront?: boolean;
+  poseValidSide?: boolean;
   detectedView?: PhotoQuality["detectedView"];
+  transformed?: boolean;
+  viewValid?: boolean;
+  reasonCodes?: ReasonCode[];
   landmarksSource: string;
   evaluateSource: string;
   error?: string;
@@ -61,7 +68,12 @@ type LandmarkPreviewData = {
   sideLandmarks: Landmark[];
   frontQuality: PhotoQuality;
   sideQuality: PhotoQuality;
+  frontMethod: string;
+  frontTransformed: boolean;
+  frontPose: PoseEstimate;
   sideMethod: string;
+  sideTransformed: boolean;
+  sidePose: PoseEstimate;
   sideBboxFound: boolean;
   sideBbox?: { x: number; y: number; width: number; height: number };
   sideScaleApplied: number;
@@ -112,45 +124,6 @@ const normalizeLandmarksForImage = (
   }));
 };
 
-const estimatePose = (
-  points: Array<{ x: number; y: number; z: number }>
-): { yaw: number; pitch: number; roll: number; detectedView: PhotoQuality["detectedView"] } => {
-  if (!points.length) {
-    return { yaw: 0, pitch: 0, roll: 0, detectedView: "unknown" };
-  }
-
-  const centerX = points.reduce((sum, pt) => sum + pt.x, 0) / points.length;
-  const centerY = points.reduce((sum, pt) => sum + pt.y, 0) / points.length;
-
-  const left = points.filter((pt) => pt.x < centerX);
-  const right = points.filter((pt) => pt.x >= centerX);
-  const upper = points.filter((pt) => pt.y < centerY);
-  const lower = points.filter((pt) => pt.y >= centerY);
-
-  const avgZ = (list: Array<{ z: number }>) =>
-    list.length ? list.reduce((sum, pt) => sum + (pt.z ?? 0), 0) / list.length : 0;
-
-  const yaw = clamp((avgZ(right) - avgZ(left)) * 180, -90, 90);
-  const pitch = clamp((avgZ(lower) - avgZ(upper)) * 180, -90, 90);
-
-  const leftmost = points.reduce((min, pt) => (pt.x < min.x ? pt : min), points[0]);
-  const rightmost = points.reduce(
-    (max, pt) => (pt.x > max.x ? pt : max),
-    points[0]
-  );
-  const roll = clamp(
-    (Math.atan2(rightmost.y - leftmost.y, rightmost.x - leftmost.x) * 180) /
-      Math.PI,
-    -90,
-    90
-  );
-
-  const absYaw = Math.abs(yaw);
-  const detectedView = absYaw < 15 ? "front" : absYaw > 35 ? "side" : "unknown";
-
-  return { yaw, pitch, roll, detectedView };
-};
-
 const computeBlurVariance = async (dataUrl: string) => {
   const image = await loadImageFromDataUrl(dataUrl);
   const maxSide = Math.max(image.width, image.height);
@@ -194,6 +167,17 @@ const computeBlurVariance = async (dataUrl: string) => {
 const MIN_SIDE_PX = 600;
 const BLUR_THRESHOLD = 40;
 const PREVIEW_STAGE_TIMEOUT_MS = 20_000;
+const DEFAULT_POSE: PoseEstimate = {
+  yaw: 0,
+  pitch: 0,
+  roll: 0,
+  source: "none",
+  matrix: null,
+  confidence: 0,
+  view: "unknown",
+  validFront: false,
+  validSide: false,
+};
 
 const evaluatePhoto = async (
   label: string,
@@ -201,11 +185,15 @@ const evaluatePhoto = async (
   landmarks: Landmark[],
   width: number,
   height: number,
-  expectedView: ExpectedView
+  expectedView: ExpectedView,
+  poseInput?: PoseEstimate,
+  transformed = false
 ): Promise<{ ok: boolean; errors: string[]; warnings: string[]; quality: PhotoQuality }> => {
   const errors: string[] = [];
   const warnings: string[] = [];
+  const reasonCodes = new Set<ReasonCode>();
   const hasLandmarks = landmarks.length > 0;
+  const pose = poseInput ?? DEFAULT_POSE;
   const normalized = normalizeLandmarksForImage(landmarks, width, height);
   const valid = normalized.filter(
     (pt) =>
@@ -219,11 +207,13 @@ const evaluatePhoto = async (
 
   if (!hasLandmarks) {
     errors.push(`${label} photo: face not detected.`);
+    reasonCodes.add("low_landmark_conf");
   }
 
   const minSidePx = Math.min(width, height);
   if (minSidePx < MIN_SIDE_PX) {
-    errors.push(`${label} photo is too small (min ${MIN_SIDE_PX}px).`);
+    warnings.push(`${label} photo is too small (min ${MIN_SIDE_PX}px).`);
+    reasonCodes.add("low_landmark_conf");
   }
 
   let faceInFrame = false;
@@ -238,7 +228,8 @@ const evaluatePhoto = async (
     faceInFrame =
       minX > margin && maxX < 1 - margin && minY > margin && maxY < 1 - margin;
     if (!faceInFrame) {
-      errors.push(`${label} photo is not a full face (cropped).`);
+      warnings.push(`${label} photo is not a full face (cropped).`);
+      reasonCodes.add("out_of_frame");
     }
   }
 
@@ -249,25 +240,52 @@ const evaluatePhoto = async (
     blurVariance = 0;
   }
   if (blurVariance < BLUR_THRESHOLD) {
-    errors.push(`${label} photo is too blurry.`);
+    warnings.push(`${label} photo is too blurry.`);
+    reasonCodes.add("blur");
   }
 
-  const { yaw, pitch, roll, detectedView } = estimatePose(normalized);
-  const absYaw = Math.abs(yaw);
-  if (hasLandmarks) {
-    if (expectedView === "front" && absYaw > 35) {
+  const detectedView = pose.view;
+  const viewValid = expectedView === "front" ? pose.validFront : pose.validSide;
+
+  if (hasLandmarks && !viewValid) {
+    reasonCodes.add("bad_pose");
+    if (expectedView === "front") {
       warnings.push("Front photo is not a frontal view.");
-    }
-    if (expectedView === "side" && absYaw < 15) {
+    } else {
       warnings.push("Side photo is not a true profile.");
     }
+  }
+
+  if (hasLandmarks) {
     if (expectedView === "side") {
       const validRatio = normalized.length ? valid.length / normalized.length : 0;
       if (landmarks.length < 200 || validRatio < 0.7) {
         warnings.push("Profile angle/visibility insufficient.");
+        reasonCodes.add("occlusion");
+      }
+      if (validRatio < 0.8) {
+        reasonCodes.add("low_landmark_conf");
       }
     }
   }
+
+  if (transformed) {
+    reasonCodes.add("transformed_detection");
+  }
+
+  const validRatio = normalized.length ? valid.length / normalized.length : 0;
+  if (hasLandmarks && validRatio < 0.75) {
+    reasonCodes.add("low_landmark_conf");
+  }
+
+  let confidence = hasLandmarks ? clamp(pose.confidence || 0.5, 0, 1) : 0;
+  if (!viewValid) confidence *= 0.78;
+  if (!faceInFrame) confidence *= 0.8;
+  if (blurVariance < BLUR_THRESHOLD) confidence *= 0.78;
+  if (minSidePx < MIN_SIDE_PX) confidence *= 0.82;
+  if (transformed) confidence *= 0.72;
+  if (validRatio > 0 && validRatio < 0.8) confidence *= 0.82;
+  confidence = clamp(confidence, 0, 1);
 
   const qualityLevel = errors.length || warnings.length ? "low" : "ok";
 
@@ -276,15 +294,20 @@ const evaluatePhoto = async (
     errors,
     warnings,
     quality: {
-      poseYaw: yaw,
-      posePitch: pitch,
-      poseRoll: roll,
+      poseYaw: pose.yaw,
+      posePitch: pose.pitch,
+      poseRoll: pose.roll,
       detectedView,
       faceInFrame,
       minSidePx,
       blurVariance,
       landmarkCount: landmarks.length,
       quality: qualityLevel,
+      confidence,
+      pose,
+      expectedView,
+      viewValid,
+      reasonCodes: Array.from(reasonCodes),
       issues: [...errors, ...warnings],
     },
   };
@@ -319,31 +342,38 @@ const buildUploadDebug = async (
       bboxFound: boolean;
       bbox?: { x: number; y: number; width: number; height: number };
       scaleApplied: number;
+      pose: PoseEstimate;
+      transformed: boolean;
     };
     if (label === "side") {
       detection = await detectLandmarksWithBBoxFallback(image.dataUrl, {
         timeoutMs: PREVIEW_STAGE_TIMEOUT_MS,
       });
     } else {
-      const frontLandmarks = await detectLandmarks(image.dataUrl, {
+      const frontDetection = await detectLandmarks(image.dataUrl, {
         timeoutMs: PREVIEW_STAGE_TIMEOUT_MS,
       });
       detection = {
-        landmarks: frontLandmarks,
-        method: frontLandmarks.length ? "normal" : "failed",
+        landmarks: frontDetection.landmarks,
+        method: frontDetection.method,
         bboxFound: false,
         bbox: undefined,
         scaleApplied: 1,
+        pose: frontDetection.pose,
+        transformed: frontDetection.transformed,
       };
     }
     const landmarks = detection.landmarks;
-    const normalized = normalizeLandmarksForImage(
+    const qualityCheck = await evaluatePhoto(
+      label === "front" ? "Front" : "Side",
+      image.dataUrl,
       landmarks,
       image.width,
-      image.height
+      image.height,
+      label,
+      detection.pose,
+      detection.transformed
     );
-    const { yaw, pitch, roll, detectedView } = estimatePose(normalized);
-    const blurVariance = await computeBlurVariance(image.dataUrl);
     return {
       ...base,
       method: detection.method,
@@ -351,12 +381,19 @@ const buildUploadDebug = async (
       bboxFound: detection.bboxFound,
       bbox: detection.bbox,
       scaleApplied: detection.scaleApplied,
-      poseYaw: yaw,
-      absYaw: Math.abs(yaw),
-      posePitch: pitch,
-      poseRoll: roll,
-      detectedView,
-      blurVariance,
+      poseYaw: qualityCheck.quality.poseYaw,
+      absYaw: Math.abs(qualityCheck.quality.poseYaw),
+      posePitch: qualityCheck.quality.posePitch,
+      poseRoll: qualityCheck.quality.poseRoll,
+      poseSource: qualityCheck.quality.pose.source,
+      poseConfidence: qualityCheck.quality.pose.confidence,
+      poseValidFront: qualityCheck.quality.pose.validFront,
+      poseValidSide: qualityCheck.quality.pose.validSide,
+      detectedView: qualityCheck.quality.detectedView,
+      transformed: detection.transformed,
+      viewValid: qualityCheck.quality.viewValid,
+      reasonCodes: qualityCheck.quality.reasonCodes,
+      blurVariance: qualityCheck.quality.blurVariance,
     };
   } catch (error) {
     return {
@@ -678,7 +715,7 @@ export default function Home() {
     );
 
     setPreviewStatus("Running landmarker...");
-    const [front, sideDetection] = await withAbortAndTimeout(
+    const [frontDetection, sideDetection] = await withAbortAndTimeout(
       Promise.all([
         detectLandmarks(frontImage.dataUrl, {
           signal,
@@ -695,6 +732,7 @@ export default function Home() {
       stageTimeout,
       "Landmark detection"
     );
+    const front = frontDetection.landmarks;
     const side = sideDetection.landmarks;
 
     setPreviewStatus("Evaluating quality...");
@@ -705,7 +743,9 @@ export default function Home() {
         front,
         frontImage.width,
         frontImage.height,
-        "front"
+        "front",
+        frontDetection.pose,
+        frontDetection.transformed
       ),
       evaluatePhoto(
         "Side",
@@ -713,7 +753,9 @@ export default function Home() {
         side,
         sideImage.width,
         sideImage.height,
-        "side"
+        "side",
+        sideDetection.pose,
+        sideDetection.transformed
       ),
     ]);
 
@@ -727,6 +769,13 @@ export default function Home() {
 
     if (!side.length) {
       sideWarning = "Side face not detected - try another angle.";
+      sideQuality = {
+        ...sideQuality,
+        quality: "low",
+        issues: mergeIssues([...sideQuality.issues, sideWarning]),
+      };
+    } else if (!sideCheck.quality.viewValid) {
+      sideWarning = "Side pose invalid - profile metrics disabled.";
       sideQuality = {
         ...sideQuality,
         quality: "low",
@@ -746,7 +795,12 @@ export default function Home() {
       sideLandmarks: side,
       frontQuality: frontCheck.quality,
       sideQuality,
+      frontMethod: frontDetection.method,
+      frontTransformed: frontDetection.transformed,
+      frontPose: frontDetection.pose,
       sideMethod: sideDetection.method,
+      sideTransformed: sideDetection.transformed,
+      sidePose: sideDetection.pose,
       sideBboxFound: sideDetection.bboxFound,
       sideBbox: sideDetection.bbox,
       sideScaleApplied: sideDetection.scaleApplied,
@@ -839,7 +893,17 @@ export default function Home() {
           sideQuality = previewData.sideQuality;
           const warnings = previewData.warnings.join(" ");
 
-          if (!sideLandmarks.length) {
+          if (previewData.sideWarning) {
+            const sideMessage = previewData.sideWarning;
+            setError(sideMessage);
+            updateProcessing(
+              "landmarks",
+              "done",
+              warnings
+                ? `${sideMessage} ${warnings}`
+                : `${sideMessage} Continuing with low-confidence side analysis.`
+            );
+          } else if (!sideLandmarks.length) {
             const sideMessage = "Side face not detected - try another angle.";
             setError(sideMessage);
             updateProcessing(
@@ -866,7 +930,7 @@ export default function Home() {
               timeoutMs: PREVIEW_STAGE_TIMEOUT_MS,
             }),
           ]);
-          frontLandmarks = front;
+          frontLandmarks = front.landmarks;
           sideLandmarks = side.landmarks;
           const [frontCheck, sideCheck] = await Promise.all([
             evaluatePhoto(
@@ -875,7 +939,9 @@ export default function Home() {
               frontLandmarks,
               frontImage.width,
               frontImage.height,
-              "front"
+              "front",
+              front.pose,
+              front.transformed
             ),
             evaluatePhoto(
               "Side",
@@ -883,7 +949,9 @@ export default function Home() {
               sideLandmarks,
               sideImage.width,
               sideImage.height,
-              "side"
+              "side",
+              side.pose,
+              side.transformed
             ),
           ]);
 
@@ -912,6 +980,16 @@ export default function Home() {
               : `${sideMessage} Continuing with low-confidence side analysis.`;
             updateProcessing("landmarks", "done", note);
           } else {
+            if (!sideCheck.quality.viewValid) {
+              const sideMessage = "Side pose invalid - profile metrics disabled.";
+              setError(sideMessage);
+              warningsList.push(sideMessage);
+              sideQuality = {
+                ...sideCheck.quality,
+                quality: "low",
+                issues: mergeIssues([...sideCheck.quality.issues, sideMessage]),
+              };
+            }
             if (!sideCheck.ok) {
               warningsList.push(...sideCheck.errors);
               sideQuality = {
@@ -1052,6 +1130,8 @@ export default function Home() {
           bbox.width
         )} ${Math.round(bbox.height)}`
       : "--";
+  const formatReasonCodes = (codes?: ReasonCode[]) =>
+    codes && codes.length ? codes.join(", ") : "--";
   const formatSource = (debug: UploadDebug | null, kind: "landmarks" | "evaluate") =>
     debug
       ? `${kind === "landmarks" ? debug.landmarksSource : debug.evaluateSource} [${debug.method ?? "--"}] | ${debug.dataUrlPrefix}...`
@@ -1298,9 +1378,39 @@ export default function Home() {
                             </span>
                           </div>
                           <div className={styles.debugRow}>
+                            <span className={styles.debugLabel}>pose source</span>
+                            <span className={styles.debugValue}>
+                              {frontDebug?.poseSource ?? "--"}
+                            </span>
+                          </div>
+                          <div className={styles.debugRow}>
+                            <span className={styles.debugLabel}>pose conf</span>
+                            <span className={styles.debugValue}>
+                              {formatNumber(frontDebug?.poseConfidence, 2)}
+                            </span>
+                          </div>
+                          <div className={styles.debugRow}>
+                            <span className={styles.debugLabel}>view valid</span>
+                            <span className={styles.debugValue}>
+                              {formatBool(frontDebug?.viewValid)}
+                            </span>
+                          </div>
+                          <div className={styles.debugRow}>
+                            <span className={styles.debugLabel}>transformed</span>
+                            <span className={styles.debugValue}>
+                              {formatBool(frontDebug?.transformed)}
+                            </span>
+                          </div>
+                          <div className={styles.debugRow}>
                             <span className={styles.debugLabel}>blur var</span>
                             <span className={styles.debugValue}>
                               {formatNumber(frontDebug?.blurVariance)}
+                            </span>
+                          </div>
+                          <div className={styles.debugRow}>
+                            <span className={styles.debugLabel}>reason codes</span>
+                            <span className={styles.debugMono}>
+                              {formatReasonCodes(frontDebug?.reasonCodes)}
                             </span>
                           </div>
                           <div className={styles.debugRow}>
@@ -1421,9 +1531,39 @@ export default function Home() {
                             </span>
                           </div>
                           <div className={styles.debugRow}>
+                            <span className={styles.debugLabel}>pose source</span>
+                            <span className={styles.debugValue}>
+                              {sideDebug?.poseSource ?? "--"}
+                            </span>
+                          </div>
+                          <div className={styles.debugRow}>
+                            <span className={styles.debugLabel}>pose conf</span>
+                            <span className={styles.debugValue}>
+                              {formatNumber(sideDebug?.poseConfidence, 2)}
+                            </span>
+                          </div>
+                          <div className={styles.debugRow}>
+                            <span className={styles.debugLabel}>view valid</span>
+                            <span className={styles.debugValue}>
+                              {formatBool(sideDebug?.viewValid)}
+                            </span>
+                          </div>
+                          <div className={styles.debugRow}>
+                            <span className={styles.debugLabel}>transformed</span>
+                            <span className={styles.debugValue}>
+                              {formatBool(sideDebug?.transformed)}
+                            </span>
+                          </div>
+                          <div className={styles.debugRow}>
                             <span className={styles.debugLabel}>blur var</span>
                             <span className={styles.debugValue}>
                               {formatNumber(sideDebug?.blurVariance)}
+                            </span>
+                          </div>
+                          <div className={styles.debugRow}>
+                            <span className={styles.debugLabel}>reason codes</span>
+                            <span className={styles.debugMono}>
+                              {formatReasonCodes(sideDebug?.reasonCodes)}
                             </span>
                           </div>
                           <div className={styles.debugRow}>
@@ -1570,7 +1710,9 @@ export default function Home() {
                       <div className={styles.debugPanel}>
                         <div className={styles.debugRow}>
                           <span className={styles.debugLabel}>method</span>
-                          <span className={styles.debugValue}>normal</span>
+                          <span className={styles.debugValue}>
+                            {previewData.frontMethod}
+                          </span>
                         </div>
                         <div className={styles.debugRow}>
                           <span className={styles.debugLabel}>quality</span>
@@ -1582,6 +1724,48 @@ export default function Home() {
                           <span className={styles.debugLabel}>pose yaw</span>
                           <span className={styles.debugValue}>
                             {formatNumber(previewData.frontQuality.poseYaw)}
+                          </span>
+                        </div>
+                        <div className={styles.debugRow}>
+                          <span className={styles.debugLabel}>pose pitch</span>
+                          <span className={styles.debugValue}>
+                            {formatNumber(previewData.frontQuality.posePitch)}
+                          </span>
+                        </div>
+                        <div className={styles.debugRow}>
+                          <span className={styles.debugLabel}>pose roll</span>
+                          <span className={styles.debugValue}>
+                            {formatNumber(previewData.frontQuality.poseRoll)}
+                          </span>
+                        </div>
+                        <div className={styles.debugRow}>
+                          <span className={styles.debugLabel}>view</span>
+                          <span className={styles.debugValue}>
+                            {previewData.frontQuality.detectedView}
+                          </span>
+                        </div>
+                        <div className={styles.debugRow}>
+                          <span className={styles.debugLabel}>confidence</span>
+                          <span className={styles.debugValue}>
+                            {formatNumber(previewData.frontQuality.confidence, 2)}
+                          </span>
+                        </div>
+                        <div className={styles.debugRow}>
+                          <span className={styles.debugLabel}>view valid</span>
+                          <span className={styles.debugValue}>
+                            {formatBool(previewData.frontQuality.viewValid)}
+                          </span>
+                        </div>
+                        <div className={styles.debugRow}>
+                          <span className={styles.debugLabel}>transformed</span>
+                          <span className={styles.debugValue}>
+                            {formatBool(previewData.frontTransformed)}
+                          </span>
+                        </div>
+                        <div className={styles.debugRow}>
+                          <span className={styles.debugLabel}>reason codes</span>
+                          <span className={styles.debugMono}>
+                            {formatReasonCodes(previewData.frontQuality.reasonCodes)}
                           </span>
                         </div>
                       </div>
@@ -1628,6 +1812,54 @@ export default function Home() {
                           <span className={styles.debugLabel}>quality</span>
                           <span className={styles.debugValue}>
                             {previewData.sideQuality.quality}
+                          </span>
+                        </div>
+                        <div className={styles.debugRow}>
+                          <span className={styles.debugLabel}>pose yaw</span>
+                          <span className={styles.debugValue}>
+                            {formatNumber(previewData.sideQuality.poseYaw)}
+                          </span>
+                        </div>
+                        <div className={styles.debugRow}>
+                          <span className={styles.debugLabel}>pose pitch</span>
+                          <span className={styles.debugValue}>
+                            {formatNumber(previewData.sideQuality.posePitch)}
+                          </span>
+                        </div>
+                        <div className={styles.debugRow}>
+                          <span className={styles.debugLabel}>pose roll</span>
+                          <span className={styles.debugValue}>
+                            {formatNumber(previewData.sideQuality.poseRoll)}
+                          </span>
+                        </div>
+                        <div className={styles.debugRow}>
+                          <span className={styles.debugLabel}>view</span>
+                          <span className={styles.debugValue}>
+                            {previewData.sideQuality.detectedView}
+                          </span>
+                        </div>
+                        <div className={styles.debugRow}>
+                          <span className={styles.debugLabel}>confidence</span>
+                          <span className={styles.debugValue}>
+                            {formatNumber(previewData.sideQuality.confidence, 2)}
+                          </span>
+                        </div>
+                        <div className={styles.debugRow}>
+                          <span className={styles.debugLabel}>view valid</span>
+                          <span className={styles.debugValue}>
+                            {formatBool(previewData.sideQuality.viewValid)}
+                          </span>
+                        </div>
+                        <div className={styles.debugRow}>
+                          <span className={styles.debugLabel}>transformed</span>
+                          <span className={styles.debugValue}>
+                            {formatBool(previewData.sideTransformed)}
+                          </span>
+                        </div>
+                        <div className={styles.debugRow}>
+                          <span className={styles.debugLabel}>reason codes</span>
+                          <span className={styles.debugMono}>
+                            {formatReasonCodes(previewData.sideQuality.reasonCodes)}
                           </span>
                         </div>
                       </div>

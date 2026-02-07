@@ -4,8 +4,8 @@ import type { Assessment } from "@/lib/types";
 import LockedOverlay from "./LockedOverlay";
 import styles from "../results.module.css";
 
-const formatScore = (score?: number) =>
-  score == null ? "--" : (score / 10).toFixed(1);
+const formatScore = (item: Assessment) =>
+  item.insufficient ? "insufficient" : item.score == null ? "--" : (item.score / 10).toFixed(1);
 
 export default function AssessmentPanel({
   title,
@@ -48,7 +48,7 @@ export default function AssessmentPanel({
                 </div>
               </div>
               <div className={styles.assessmentCardScore}>
-                {formatScore(item.score)} / 10
+                {formatScore(item)}
               </div>
               <div className={styles.assessmentCardNote}>
                 {item.note ?? "No notes available yet."}

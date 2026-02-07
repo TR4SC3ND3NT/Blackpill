@@ -1,6 +1,6 @@
 "use client";
 
-import type { Landmark } from "./types";
+import type { Landmark, PoseEstimate } from "./types";
 
 type VisionModule = typeof import("@mediapipe/tasks-vision");
 
@@ -33,6 +33,15 @@ export type LandmarksWithBBoxResult = {
   bboxFound: boolean;
   bbox?: BBox;
   scaleApplied: number;
+  pose: PoseEstimate;
+  transformed: boolean;
+};
+
+export type LandmarksDetectionResult = {
+  landmarks: Landmark[];
+  method: "normal" | "failed";
+  pose: PoseEstimate;
+  transformed: boolean;
 };
 
 type FaceDetectionLike = {
@@ -43,6 +52,13 @@ type FaceDetectionLike = {
     width: number;
     height: number;
   };
+};
+
+type RawLandmark = {
+  x: number;
+  y: number;
+  z?: number;
+  visibility?: number;
 };
 
 type BBoxAttempt = {
@@ -221,6 +237,146 @@ const mapLoadError = (error: unknown, stage: string) => {
   );
 };
 
+const FRONT_VALID_LIMITS = { yaw: 10, pitch: 10, roll: 7 };
+const SIDE_VALID_LIMITS = { yawMin: 70, pitch: 12, roll: 10 };
+
+const classifyViewFromYaw = (yaw: number): PoseEstimate["view"] => {
+  const absYaw = Math.abs(yaw);
+  if (absYaw <= 15) return "front";
+  if (absYaw >= 60) return "side";
+  return "unknown";
+};
+
+const withPoseValidity = (
+  yaw: number,
+  pitch: number,
+  roll: number,
+  source: PoseEstimate["source"],
+  matrix: number[] | null,
+  confidence: number
+): PoseEstimate => {
+  const absYaw = Math.abs(yaw);
+  const absPitch = Math.abs(pitch);
+  const absRoll = Math.abs(roll);
+  return {
+    yaw,
+    pitch,
+    roll,
+    source,
+    matrix,
+    confidence: clamp01(confidence),
+    view: classifyViewFromYaw(yaw),
+    validFront:
+      absYaw <= FRONT_VALID_LIMITS.yaw &&
+      absPitch <= FRONT_VALID_LIMITS.pitch &&
+      absRoll <= FRONT_VALID_LIMITS.roll,
+    validSide:
+      absYaw >= SIDE_VALID_LIMITS.yawMin &&
+      absPitch <= SIDE_VALID_LIMITS.pitch &&
+      absRoll <= SIDE_VALID_LIMITS.roll,
+  };
+};
+
+const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
+const emptyPose = () => withPoseValidity(0, 0, 0, "none", null, 0);
+
+const parseMatrix = (matrixLike: unknown): number[] | null => {
+  const raw =
+    typeof matrixLike === "object" && matrixLike != null && "data" in matrixLike
+      ? (matrixLike as { data?: unknown }).data
+      : matrixLike;
+  if (!Array.isArray(raw)) return null;
+  const matrix = raw.map((value) => Number(value));
+  if (matrix.length < 16 || matrix.some((value) => !Number.isFinite(value))) return null;
+  return matrix.slice(0, 16);
+};
+
+const matrixToEuler = (matrix: number[]) => {
+  const r00 = matrix[0];
+  const r01 = matrix[1];
+  const r02 = matrix[2];
+  const r10 = matrix[4];
+  const r11 = matrix[5];
+  const r12 = matrix[6];
+  const r20 = matrix[8];
+  const r21 = matrix[9];
+  const r22 = matrix[10];
+
+  const sy = Math.sqrt(r00 * r00 + r10 * r10);
+  const singular = sy < 1e-6;
+
+  let roll = 0;
+  let pitch = 0;
+  let yaw = 0;
+
+  if (!singular) {
+    roll = Math.atan2(r21, r22);
+    pitch = Math.atan2(-r20, sy);
+    yaw = Math.atan2(r10, r00);
+  } else {
+    roll = Math.atan2(-r12, r11);
+    pitch = Math.atan2(-r20, sy);
+    yaw = 0;
+  }
+
+  return {
+    yaw: (yaw * 180) / Math.PI,
+    pitch: (pitch * 180) / Math.PI,
+    roll: (roll * 180) / Math.PI,
+    matrixOrthonormality: Math.abs(r00 * r01 + r10 * r11 + r20 * r21),
+    forwardMagnitude: Math.sqrt(r02 * r02 + r12 * r12 + r22 * r22),
+  };
+};
+
+const fallbackPoseFromPoints = (points: RawLandmark[]): PoseEstimate => {
+  if (!points.length) {
+    return withPoseValidity(0, 0, 0, "none", null, 0);
+  }
+
+  const centerX = points.reduce((sum, point) => sum + point.x, 0) / points.length;
+  const centerY = points.reduce((sum, point) => sum + point.y, 0) / points.length;
+
+  const left = points.filter((point) => point.x < centerX);
+  const right = points.filter((point) => point.x >= centerX);
+  const upper = points.filter((point) => point.y < centerY);
+  const lower = points.filter((point) => point.y >= centerY);
+
+  const averageZ = (items: RawLandmark[]) =>
+    items.length
+      ? items.reduce((sum, point) => sum + (Number.isFinite(point.z ?? 0) ? point.z ?? 0 : 0), 0) /
+        items.length
+      : 0;
+
+  const yaw = Math.max(-90, Math.min(90, (averageZ(right) - averageZ(left)) * 180));
+  const pitch = Math.max(-90, Math.min(90, (averageZ(lower) - averageZ(upper)) * 180));
+  const leftMost = points.reduce((current, point) => (point.x < current.x ? point : current), points[0]);
+  const rightMost = points.reduce(
+    (current, point) => (point.x > current.x ? point : current),
+    points[0]
+  );
+  const roll = Math.max(
+    -90,
+    Math.min(
+      90,
+      (Math.atan2(rightMost.y - leftMost.y, rightMost.x - leftMost.x) * 180) / Math.PI
+    )
+  );
+
+  return withPoseValidity(yaw, pitch, roll, "fallback", null, 0.45);
+};
+
+const extractPoseFromDetection = (
+  matrixLike: unknown,
+  points: RawLandmark[]
+): PoseEstimate => {
+  const matrix = parseMatrix(matrixLike);
+  if (!matrix) return fallbackPoseFromPoints(points);
+  const { yaw, pitch, roll, matrixOrthonormality, forwardMagnitude } = matrixToEuler(matrix);
+  const confidence = clamp01(1 - matrixOrthonormality * 2) * clamp01(forwardMagnitude);
+  if (![yaw, pitch, roll].every(Number.isFinite)) return fallbackPoseFromPoints(points);
+  return withPoseValidity(yaw, pitch, roll, "matrix", matrix, confidence);
+};
+
 const getVision = async () => {
   if (!visionPromise) {
     visionPromise = import("@mediapipe/tasks-vision");
@@ -282,7 +438,7 @@ export const getFaceLandmarker = async (options: DetectionRuntimeOptions = {}) =
             minFacePresenceConfidence: 0.1,
             minTrackingConfidence: 0.1,
             outputFaceBlendshapes: false,
-            outputFacialTransformationMatrixes: false,
+            outputFacialTransformationMatrixes: true,
           })
         );
 
@@ -453,7 +609,12 @@ const detectOnSource = async (
     Promise.resolve(landmarker.detect(input))
   );
   throwIfAborted(options.signal);
-  return result.faceLandmarks?.[0] ?? [];
+  const points = (result.faceLandmarks?.[0] ?? []) as RawLandmark[];
+  const matrixLike = result.facialTransformationMatrixes?.[0];
+  return {
+    points,
+    pose: extractPoseFromDetection(matrixLike, points),
+  };
 };
 
 const detectFacesOnSource = async (
@@ -756,8 +917,12 @@ const detectCropLandmarks = async (
   for (const candidate of candidates) {
     throwIfAborted(options.signal);
     const direct = await detectOnSource(candidate, options);
-    if (direct.length) {
-      return direct;
+    if (direct.points.length) {
+      return {
+        points: direct.points,
+        pose: direct.pose,
+        transformed: false,
+      };
     }
 
     const flipped = createFlippedCanvasFromSource(
@@ -767,8 +932,20 @@ const detectCropLandmarks = async (
     );
     if (flipped) {
       const flippedPoints = await detectOnSource(flipped, options);
-      if (flippedPoints.length) {
-        return mapFlippedCropPoints(flippedPoints);
+      if (flippedPoints.points.length) {
+        const mapped = mapFlippedCropPoints(flippedPoints.points);
+        return {
+          points: mapped,
+          pose: withPoseValidity(
+            -flippedPoints.pose.yaw,
+            flippedPoints.pose.pitch,
+            flippedPoints.pose.roll,
+            "fallback",
+            null,
+            0.35
+          ),
+          transformed: true,
+        };
       }
     }
 
@@ -781,23 +958,38 @@ const detectCropLandmarks = async (
       );
       if (!rotated) continue;
       const rotatedPoints = await detectOnSource(rotated, options);
-      if (rotatedPoints.length) {
-        return mapFromRotate(rotatedPoints, deg);
+      if (rotatedPoints.points.length) {
+        const mapped = mapFromRotate(rotatedPoints.points, deg);
+        return {
+          points: mapped,
+          pose: fallbackPoseFromPoints(mapped),
+          transformed: true,
+        };
       }
     }
   }
 
-  return [];
+  return {
+    points: [] as RawLandmark[],
+    pose: emptyPose(),
+    transformed: false,
+  };
 };
 
 export const detectLandmarks = async (
   dataUrl: string,
   options: DetectionRuntimeOptions = {}
-): Promise<Landmark[]> =>
+): Promise<LandmarksDetectionResult> =>
   withQueue(async () => {
     const image = await loadImageFromDataUrl(dataUrl, options);
-    const points = await detectOnSource(image, options);
-    return mapPoints(points);
+    const detection = await detectOnSource(image, options);
+    const landmarks = mapPoints(detection.points);
+    return {
+      landmarks,
+      method: landmarks.length ? "normal" : "failed",
+      pose: detection.pose,
+      transformed: false,
+    };
   }, options, "detectLandmarks");
 
 export const detectLandmarksWithBBoxFallback = async (
@@ -814,6 +1006,8 @@ export const detectLandmarksWithBBoxFallback = async (
         method: "failed",
         bboxFound: false,
         scaleApplied: 1,
+        pose: emptyPose(),
+        transformed: false,
       };
     }
 
@@ -856,13 +1050,13 @@ export const detectLandmarksWithBBoxFallback = async (
           continue;
         }
 
-        const points = await detectCropLandmarks(cropCanvas, options);
-        if (!points.length) {
+        const cropDetection = await detectCropLandmarks(cropCanvas, options);
+        if (!cropDetection.points.length) {
           continue;
         }
 
         const mapped = mapFromCropToOriginal(
-          points,
+          cropDetection.points,
           expandedOnOriginal,
           1,
           1,
@@ -879,6 +1073,8 @@ export const detectLandmarksWithBBoxFallback = async (
           bboxFound: true,
           bbox: bboxOnOriginal,
           scaleApplied: scaled.scaleApplied,
+          pose: cropDetection.pose,
+          transformed: cropDetection.transformed,
         };
       }
     }
@@ -889,6 +1085,8 @@ export const detectLandmarksWithBBoxFallback = async (
       bboxFound,
       bbox: lastBBox,
       scaleApplied: lastScaleApplied,
+      pose: emptyPose(),
+      transformed: false,
     };
   }, options, "detectLandmarksWithBBoxFallback");
 
@@ -1006,16 +1204,16 @@ export const detectLandmarksWithFallback = async (
   withQueue(async () => {
     const image = await loadImageFromDataUrl(dataUrl);
     const points = await detectOnSource(image);
-    if (points.length) {
-      return { landmarks: mapPoints(points), method: "normal" };
+    if (points.points.length) {
+      return { landmarks: mapPoints(points.points), method: "normal" };
     }
 
     if (options.allowFlip) {
       const flipped = createFlippedCanvas(image);
       if (flipped) {
         const flippedPoints = await detectOnSource(flipped);
-        if (flippedPoints.length) {
-          const mapped = flippedPoints.map((point) => ({
+        if (flippedPoints.points.length) {
+          const mapped = flippedPoints.points.map((point) => ({
             x: 1 - point.x,
             y: point.y,
             z: point.z,
@@ -1030,10 +1228,10 @@ export const detectLandmarksWithFallback = async (
       const padded = createPaddedCanvas(image, false);
       if (padded) {
         const paddedPoints = await detectOnSource(padded.canvas);
-        if (paddedPoints.length) {
+        if (paddedPoints.points.length) {
           return {
             landmarks: mapFromPadded(
-              paddedPoints,
+              paddedPoints.points,
               padded.size,
               padded.offsetX,
               padded.offsetY,
@@ -1050,10 +1248,10 @@ export const detectLandmarksWithFallback = async (
         const paddedFlip = createPaddedCanvas(image, true);
         if (paddedFlip) {
           const paddedPoints = await detectOnSource(paddedFlip.canvas);
-          if (paddedPoints.length) {
+          if (paddedPoints.points.length) {
             return {
               landmarks: mapFromPadded(
-                paddedPoints,
+                paddedPoints.points,
                 paddedFlip.size,
                 paddedFlip.offsetX,
                 paddedFlip.offsetY,
@@ -1071,24 +1269,33 @@ export const detectLandmarksWithFallback = async (
     const rotate90 = createRotatedCanvas(image, 90);
     if (rotate90) {
       const rotatedPoints = await detectOnSource(rotate90.canvas);
-      if (rotatedPoints.length) {
-        return { landmarks: mapFromRotate(rotatedPoints, 90), method: "rotate-90" };
+      if (rotatedPoints.points.length) {
+        return {
+          landmarks: mapFromRotate(rotatedPoints.points, 90),
+          method: "rotate-90",
+        };
       }
     }
 
     const rotate270 = createRotatedCanvas(image, 270);
     if (rotate270) {
       const rotatedPoints = await detectOnSource(rotate270.canvas);
-      if (rotatedPoints.length) {
-        return { landmarks: mapFromRotate(rotatedPoints, 270), method: "rotate-270" };
+      if (rotatedPoints.points.length) {
+        return {
+          landmarks: mapFromRotate(rotatedPoints.points, 270),
+          method: "rotate-270",
+        };
       }
     }
 
     const rotate180 = createRotatedCanvas(image, 180);
     if (rotate180) {
       const rotatedPoints = await detectOnSource(rotate180.canvas);
-      if (rotatedPoints.length) {
-        return { landmarks: mapFromRotate(rotatedPoints, 180), method: "rotate-180" };
+      if (rotatedPoints.points.length) {
+        return {
+          landmarks: mapFromRotate(rotatedPoints.points, 180),
+          method: "rotate-180",
+        };
       }
     }
 

@@ -5,17 +5,45 @@ export type Landmark = {
   visibility?: number;
 };
 
+export type ViewLabel = "front" | "side" | "unknown";
+
+export type ReasonCode =
+  | "bad_pose"
+  | "occlusion"
+  | "blur"
+  | "out_of_frame"
+  | "low_landmark_conf"
+  | "side_disabled"
+  | "transformed_detection";
+
+export type PoseEstimate = {
+  yaw: number;
+  pitch: number;
+  roll: number;
+  source: "matrix" | "fallback" | "none";
+  matrix?: number[] | null;
+  confidence: number;
+  view: ViewLabel;
+  validFront: boolean;
+  validSide: boolean;
+};
+
 export type PhotoQuality = {
   poseYaw: number;
   posePitch: number;
   poseRoll: number;
-  detectedView: "front" | "side" | "unknown";
+  detectedView: ViewLabel;
   faceInFrame: boolean;
   minSidePx: number;
   blurVariance: number;
   landmarkCount: number;
   quality: "ok" | "low";
   issues: string[];
+  confidence: number;
+  pose: PoseEstimate;
+  expectedView: "front" | "side";
+  viewValid: boolean;
+  reasonCodes: ReasonCode[];
 };
 
 export type Assessment = {
@@ -23,6 +51,31 @@ export type Assessment = {
   score: number;
   note?: string;
   severity: "low" | "medium" | "high";
+  metricId?: string;
+  pillar?: "harmony" | "angularity" | "dimorphism" | "features";
+  confidence?: number;
+  usedWeight?: number;
+  insufficient?: boolean;
+  validityReason?: string;
+  value?: number | null;
+  errorBar?: number | null;
+};
+
+export type MetricDiagnostic = {
+  id: string;
+  title: string;
+  pillar: "harmony" | "angularity" | "dimorphism" | "features";
+  view: "front" | "side" | "either";
+  value: number | null;
+  score: number | null;
+  confidence: number;
+  baseWeight: number;
+  usedWeight: number;
+  scored: boolean;
+  insufficient: boolean;
+  validityReason: string | null;
+  reasonCodes: ReasonCode[];
+  errorBar: number | null;
 };
 
 export type FaceRecord = {
@@ -48,9 +101,16 @@ export type FaceRecord = {
   dimorphismScore: number;
   angularityScore: number;
   featuresScore: number;
+  overallConfidence?: number;
+  overallErrorBar?: number;
+  harmonyConfidence?: number;
+  angularityConfidence?: number;
+  dimorphismConfidence?: number;
+  featuresConfidence?: number;
   angularityAssessments: Assessment[];
   dimorphismAssessments: Assessment[];
   featuresAssessments: Assessment[];
+  metricDiagnostics?: MetricDiagnostic[];
   frontPhotoUrl: string;
   sidePhotoUrl: string;
   frontPhotoSegmentedUrl?: string | null;

@@ -10,6 +10,9 @@ export default function ProsConsPanel({
   strengths: Assessment[];
   weaknesses: Assessment[];
 }) {
+  const renderScore = (item: Assessment) =>
+    item.insufficient ? "insufficient" : (item.score / 10).toFixed(1);
+
   return (
     <div className={styles.prosConsGrid}>
       <div className={styles.prosConsCard}>
@@ -24,7 +27,7 @@ export default function ProsConsPanel({
                 <div className={styles.prosConsItemTitle}>{item.title}</div>
                 <div className={styles.prosConsItemNote}>{item.note ?? ""}</div>
               </div>
-              <div className={styles.prosConsScore}>{(item.score / 10).toFixed(1)}</div>
+              <div className={styles.prosConsScore}>{renderScore(item)}</div>
             </div>
           ))}
         </div>
@@ -42,7 +45,7 @@ export default function ProsConsPanel({
                 <div className={styles.prosConsItemNote}>{item.note ?? ""}</div>
               </div>
               <div className={`${styles.prosConsScore} ${styles.prosConsScoreWeak}`}>
-                {(item.score / 10).toFixed(1)}
+                {renderScore(item)}
               </div>
             </div>
           ))}

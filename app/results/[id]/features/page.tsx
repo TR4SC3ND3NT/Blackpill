@@ -55,7 +55,9 @@ export default function FeaturesPage() {
     face.frontQuality?.quality === "ok" && face.sideQuality?.quality === "ok"
       ? "ok"
       : "low";
-  const sorted = [...face.featuresAssessments].sort((a, b) => b.score - a.score);
+  const sorted = [...face.featuresAssessments]
+    .filter((item) => !item.insufficient)
+    .sort((a, b) => b.score - a.score);
   const strengths = sorted.slice(0, 3);
   const weaknesses = sorted.slice(-3).reverse();
 

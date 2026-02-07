@@ -55,7 +55,9 @@ export default function AngularityPage() {
     face.frontQuality?.quality === "ok" && face.sideQuality?.quality === "ok"
       ? "ok"
       : "low";
-  const sorted = [...face.angularityAssessments].sort((a, b) => b.score - a.score);
+  const sorted = [...face.angularityAssessments]
+    .filter((item) => !item.insufficient)
+    .sort((a, b) => b.score - a.score);
   const strengths = sorted.slice(0, 3);
   const weaknesses = sorted.slice(-3).reverse();
 

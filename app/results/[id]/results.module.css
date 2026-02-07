@@ -862,6 +862,47 @@
   font-size: 12px;
 }
 
+.metricsTableWrap {
+  margin-top: 16px;
+  border: 1px solid rgba(12, 24, 46, 0.08);
+  border-radius: 14px;
+  overflow: auto;
+  background: rgba(15, 20, 30, 0.02);
+}
+
+.metricsTableTitle {
+  padding: 10px 12px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(15, 20, 30, 0.55);
+  border-bottom: 1px solid rgba(12, 24, 46, 0.08);
+}
+
+.metricsTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.metricsTable th,
+.metricsTable td {
+  padding: 8px 10px;
+  text-align: left;
+  border-bottom: 1px solid rgba(12, 24, 46, 0.06);
+  white-space: nowrap;
+}
+
+.metricsTable th {
+  font-weight: 600;
+  color: rgba(15, 20, 30, 0.6);
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.metricsTable td {
+  color: rgba(15, 20, 30, 0.78);
+}
+
 .prosConsGrid {
   display: grid;
   gap: 18px;

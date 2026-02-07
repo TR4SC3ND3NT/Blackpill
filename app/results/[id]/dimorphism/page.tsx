@@ -55,7 +55,9 @@ export default function DimorphismPage() {
     face.frontQuality?.quality === "ok" && face.sideQuality?.quality === "ok"
       ? "ok"
       : "low";
-  const sorted = [...face.dimorphismAssessments].sort((a, b) => b.score - a.score);
+  const sorted = [...face.dimorphismAssessments]
+    .filter((item) => !item.insufficient)
+    .sort((a, b) => b.score - a.score);
   const strengths = sorted.slice(0, 3);
   const weaknesses = sorted.slice(-3).reverse();
 

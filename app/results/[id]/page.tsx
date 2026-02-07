@@ -72,9 +72,16 @@ export default function ResultsOverviewPage() {
     ...face.dimorphismAssessments,
     ...face.featuresAssessments,
   ];
-  const sorted = [...assessments].sort((a, b) => b.score - a.score);
+  const sorted = [...assessments]
+    .filter((item) => !item.insufficient)
+    .sort((a, b) => b.score - a.score);
   const strengths = sorted.slice(0, 3);
   const weaknesses = sorted.slice(-3).reverse();
+  const metricDiagnostics = face.metricDiagnostics ?? [];
+  const formatFloat = (value: number | null | undefined, digits = 2) =>
+    value == null || Number.isNaN(value) ? "--" : value.toFixed(digits);
+  const formatReasonCodes = (codes?: string[]) =>
+    codes && codes.length ? codes.join(", ") : "--";
 
   return (
     <>
@@ -276,6 +283,28 @@ export default function ResultsOverviewPage() {
             </span>
           </div>
           <div className={styles.diagnosticItem}>
+            <span className={styles.diagnosticLabel}>front.viewValid</span>
+            <span className={styles.diagnosticValue}>
+              {diagnostics.frontQuality
+                ? diagnostics.frontQuality.viewValid
+                  ? "true"
+                  : "false"
+                : "--"}
+            </span>
+          </div>
+          <div className={styles.diagnosticItem}>
+            <span className={styles.diagnosticLabel}>front.confidence</span>
+            <span className={styles.diagnosticValue}>
+              {formatFloat(diagnostics.frontQuality?.confidence)}
+            </span>
+          </div>
+          <div className={styles.diagnosticItem}>
+            <span className={styles.diagnosticLabel}>front.reasonCodes</span>
+            <span className={styles.diagnosticValue}>
+              {formatReasonCodes(diagnostics.frontQuality?.reasonCodes)}
+            </span>
+          </div>
+          <div className={styles.diagnosticItem}>
             <span className={styles.diagnosticLabel}>front.faceInFrame</span>
             <span className={styles.diagnosticValue}>
               {diagnostics.frontQuality
@@ -316,6 +345,28 @@ export default function ResultsOverviewPage() {
             </span>
           </div>
           <div className={styles.diagnosticItem}>
+            <span className={styles.diagnosticLabel}>side.viewValid</span>
+            <span className={styles.diagnosticValue}>
+              {diagnostics.sideQuality
+                ? diagnostics.sideQuality.viewValid
+                  ? "true"
+                  : "false"
+                : "--"}
+            </span>
+          </div>
+          <div className={styles.diagnosticItem}>
+            <span className={styles.diagnosticLabel}>side.confidence</span>
+            <span className={styles.diagnosticValue}>
+              {formatFloat(diagnostics.sideQuality?.confidence)}
+            </span>
+          </div>
+          <div className={styles.diagnosticItem}>
+            <span className={styles.diagnosticLabel}>side.reasonCodes</span>
+            <span className={styles.diagnosticValue}>
+              {formatReasonCodes(diagnostics.sideQuality?.reasonCodes)}
+            </span>
+          </div>
+          <div className={styles.diagnosticItem}>
             <span className={styles.diagnosticLabel}>side.faceInFrame</span>
             <span className={styles.diagnosticValue}>
               {diagnostics.sideQuality
@@ -331,7 +382,54 @@ export default function ResultsOverviewPage() {
               {diagnostics.isNormalized ? "true" : "false"}
             </span>
           </div>
+          <div className={styles.diagnosticItem}>
+            <span className={styles.diagnosticLabel}>overall.confidence</span>
+            <span className={styles.diagnosticValue}>
+              {formatFloat(face.overallConfidence)}
+            </span>
+          </div>
+          <div className={styles.diagnosticItem}>
+            <span className={styles.diagnosticLabel}>overall.errorBar</span>
+            <span className={styles.diagnosticValue}>
+              ±{formatFloat(face.overallErrorBar)}
+            </span>
+          </div>
         </div>
+        {metricDiagnostics.length ? (
+          <div className={styles.metricsTableWrap}>
+            <div className={styles.metricsTableTitle}>Raw Metrics Export</div>
+            <table className={styles.metricsTable}>
+              <thead>
+                <tr>
+                  <th>Metric</th>
+                  <th>Pillar</th>
+                  <th>View</th>
+                  <th>Value</th>
+                  <th>Score</th>
+                  <th>Conf</th>
+                  <th>Used W</th>
+                  <th>Status</th>
+                  <th>Reason</th>
+                </tr>
+              </thead>
+              <tbody>
+                {metricDiagnostics.map((metric) => (
+                  <tr key={metric.id}>
+                    <td>{metric.title}</td>
+                    <td>{metric.pillar}</td>
+                    <td>{metric.view}</td>
+                    <td>{formatFloat(metric.value, 4)}</td>
+                    <td>{metric.scored ? formatFloat((metric.score ?? 0) / 10, 2) : "--"}</td>
+                    <td>{formatFloat(metric.confidence, 2)}</td>
+                    <td>{formatFloat(metric.usedWeight, 3)}</td>
+                    <td>{metric.scored ? "scored" : "insufficient"}</td>
+                    <td>{metric.validityReason ?? "--"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
         {diagnostics.sideTooSmall ? (
           <div className={styles.warningText}>
             Side image resolution too low for reliable landmarks.
