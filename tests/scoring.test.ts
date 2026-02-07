@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { computeScores } from "../lib/scoring";
-import type { Landmark, PhotoQuality, PoseEstimate } from "../lib/types";
+import type {
+  Landmark,
+  ManualLandmarkPoint,
+  PhotoQuality,
+  PoseEstimate,
+} from "../lib/types";
 
 const setPoint = (points: Landmark[], index: number, x: number, y: number) => {
   points[index] = { x, y, z: points[index]?.z ?? 0, visibility: 1 };
@@ -266,4 +271,41 @@ test("three-quarter side keeps profile metrics scored with reduced weight", () =
   assert.ok(sideMetrics.length > 0);
   assert.ok(sideMetrics.some((metric) => metric.scored));
   assert.ok(sideMetrics.some((metric) => metric.usedWeight > 0));
+});
+
+test("manual unconfirmed required point disables dependent metric", () => {
+  const front = buildFrontLandmarks();
+  const side = buildSideLandmarks();
+
+  const manualLandmarks: ManualLandmarkPoint[] = [
+    {
+      id: "left_eye_lateral_canthus",
+      name: "Left Eye Lateral Canthus",
+      view: "front",
+      x: front[33].x,
+      y: front[33].y,
+      source: "auto",
+      confidence: 0.42,
+      reasonCodes: ["manual_required"],
+      confirmed: false,
+      required: true,
+      mediapipeIndex: 33,
+    },
+  ];
+
+  const result = computeScores({
+    frontLandmarks: front,
+    sideLandmarks: side,
+    frontQuality: makeQuality("front"),
+    sideQuality: makeQuality("side"),
+    manualLandmarks,
+  });
+
+  const symmetryMetric = result.metricDiagnostics.find(
+    (metric) => metric.id === "harmony_symmetry"
+  );
+  assert.ok(symmetryMetric);
+  assert.equal(symmetryMetric?.scored, false);
+  assert.equal(symmetryMetric?.insufficient, true);
+  assert.ok((symmetryMetric?.validityReason ?? "").startsWith("manual_unconfirmed"));
 });

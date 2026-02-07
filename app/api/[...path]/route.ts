@@ -231,6 +231,7 @@ export async function POST(req: Request, context: { params: Promise<Params> }) {
       mediapipeLandmarks?: LandmarkInput;
       frontQuality?: FaceRecord["frontQuality"];
       sideQuality?: FaceRecord["sideQuality"];
+      manualLandmarks?: FaceRecord["manualLandmarks"];
       gender?: string;
       race?: string;
     };
@@ -255,6 +256,7 @@ export async function POST(req: Request, context: { params: Promise<Params> }) {
       mediapipeLandmarks,
       frontQuality: body.frontQuality ?? null,
       sideQuality: body.sideQuality ?? null,
+      manualLandmarks: body.manualLandmarks ?? null,
     });
 
     return json({

@@ -5,6 +5,23 @@ export type Landmark = {
   visibility?: number;
 };
 
+export type ManualLandmarkSource = "auto" | "manual";
+export type ManualLandmarkView = "front" | "side";
+
+export type ManualLandmarkPoint = {
+  id: string;
+  name: string;
+  view: ManualLandmarkView;
+  x: number;
+  y: number;
+  source: ManualLandmarkSource;
+  confidence: number;
+  reasonCodes: string[];
+  confirmed: boolean;
+  required: boolean;
+  mediapipeIndex?: number | null;
+};
+
 export type ViewLabel = "front" | "three_quarter" | "side" | "unknown";
 
 export type ReasonCode =
@@ -17,6 +34,7 @@ export type ReasonCode =
   | "blur"
   | "out_of_frame"
   | "low_landmark_conf"
+  | "manual_unconfirmed"
   | "side_disabled"
   | "transformed_detection";
 
@@ -134,6 +152,7 @@ export type FaceRecord = {
   mediapipeLandmarks?: Landmark[] | null;
   frontQuality?: PhotoQuality | null;
   sideQuality?: PhotoQuality | null;
+  manualLandmarks?: ManualLandmarkPoint[] | null;
 };
 
 export type SubscriptionInfo = {

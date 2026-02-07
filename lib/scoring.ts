@@ -1,6 +1,7 @@
 import type {
   Assessment,
   Landmark,
+  ManualLandmarkPoint,
   MetricDiagnostic,
   PhotoQuality,
   ReasonCode,
@@ -139,6 +140,7 @@ type ScoreContext = {
   side: Landmark[];
   frontAligned: Landmark[];
   sideAligned: Landmark[];
+  manualByIndex: Map<string, ManualLandmarkPoint>;
   frontQuality: PhotoQuality;
   sideQuality: PhotoQuality;
   ipd: number;
@@ -247,6 +249,57 @@ const hasRequiredPoints = (points: Landmark[], indices: number[]) =>
 const profileDirectionAwareDelta = (a: Landmark, b: Landmark, yaw: number) => {
   const sign = yaw >= 0 ? 1 : -1;
   return sign * (a.x - b.x);
+};
+
+const manualKey = (view: "front" | "side", index: number) => `${view}:${index}`;
+
+const buildManualMap = (points: ManualLandmarkPoint[] = []) => {
+  const map = new Map<string, ManualLandmarkPoint>();
+  for (const point of points) {
+    if (point.mediapipeIndex == null) continue;
+    if (!Number.isFinite(point.mediapipeIndex)) continue;
+    map.set(manualKey(point.view, point.mediapipeIndex), point);
+  }
+  return map;
+};
+
+const validateManualForMetric = (
+  metric: MetricDefinition,
+  ctx: ScoreContext
+): {
+  valid: boolean;
+  reason: string | null;
+} => {
+  const views: Array<"front" | "side"> =
+    metric.view === "either" ? ["front", "side"] : [metric.view];
+
+  let hasManualCoverage = false;
+  const invalidPoints: string[] = [];
+
+  for (const view of views) {
+    for (const index of metric.requiredPoints) {
+      const point = ctx.manualByIndex.get(manualKey(view, index));
+      if (!point) continue;
+      hasManualCoverage = true;
+      const lowConfidence = point.confidence < 0.55;
+      if (!point.confirmed || lowConfidence) {
+        invalidPoints.push(point.id);
+      }
+    }
+  }
+
+  if (!hasManualCoverage) {
+    return { valid: true, reason: null };
+  }
+
+  if (invalidPoints.length) {
+    return {
+      valid: false,
+      reason: `manual_unconfirmed:${Array.from(new Set(invalidPoints)).join(",")}`,
+    };
+  }
+
+  return { valid: true, reason: null };
 };
 
 const lineDeviation = (points: Landmark[], start: Landmark, end: Landmark, scale: number) => {
@@ -692,7 +745,8 @@ const buildContext = (
   frontLandmarks: Landmark[],
   sideLandmarks: Landmark[],
   frontQualityInput?: PhotoQuality | null,
-  sideQualityInput?: PhotoQuality | null
+  sideQualityInput?: PhotoQuality | null,
+  manualPoints: ManualLandmarkPoint[] = []
 ): ScoreContext => {
   const frontQuality = ensureQuality(frontQualityInput, "front");
   const sideQuality = ensureQuality(sideQualityInput, "side");
@@ -739,6 +793,7 @@ const buildContext = (
     side: sideLandmarks,
     frontAligned,
     sideAligned,
+    manualByIndex: buildManualMap(manualPoints),
     frontQuality,
     sideQuality,
     ipd,
@@ -749,6 +804,26 @@ const buildContext = (
 };
 
 const evaluateMetric = (metric: MetricDefinition, ctx: ScoreContext): MetricResult => {
+  const manualValidation = validateManualForMetric(metric, ctx);
+  if (!manualValidation.valid) {
+    return {
+      id: metric.id,
+      title: metric.title,
+      pillar: metric.pillar,
+      view: metric.view,
+      value: null,
+      score: null,
+      confidence: 0,
+      baseWeight: metric.baseWeight,
+      usedWeight: 0,
+      scored: false,
+      insufficient: true,
+      validityReason: manualValidation.reason ?? "manual_unconfirmed",
+      reasonCodes: ["manual_unconfirmed"],
+      errorBar: null,
+    };
+  }
+
   const requiredOnView =
     metric.view === "front"
       ? hasRequiredPoints(ctx.frontAligned, metric.requiredPoints)
@@ -929,6 +1004,7 @@ type ScoreInput = {
   sideLandmarks?: LandmarkInput;
   frontQuality?: PhotoQuality | null;
   sideQuality?: PhotoQuality | null;
+  manualLandmarks?: ManualLandmarkPoint[] | null;
 };
 
 export const computeScores = ({
@@ -936,11 +1012,18 @@ export const computeScores = ({
   sideLandmarks,
   frontQuality,
   sideQuality,
+  manualLandmarks,
 }: ScoreInput) => {
   const front = normalizeLandmarks(frontLandmarks);
   const side = normalizeLandmarks(sideLandmarks);
 
-  const ctx = buildContext(front, side, frontQuality, sideQuality);
+  const ctx = buildContext(
+    front,
+    side,
+    frontQuality,
+    sideQuality,
+    manualLandmarks ?? []
+  );
   const metricResults = metricDefinitions.map((metric) => evaluateMetric(metric, ctx));
 
   const harmony = aggregatePillar("harmony", metricResults);

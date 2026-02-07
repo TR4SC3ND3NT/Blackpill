@@ -86,6 +86,7 @@ export const createFace = (input: {
   mediapipeLandmarks?: LandmarkInput;
   frontQuality?: FaceRecord["frontQuality"];
   sideQuality?: FaceRecord["sideQuality"];
+  manualLandmarks?: FaceRecord["manualLandmarks"];
 }) => {
   const id = generateId();
   const createdAt = new Date().toISOString();
@@ -100,6 +101,7 @@ export const createFace = (input: {
     sideLandmarks,
     frontQuality: input.frontQuality ?? null,
     sideQuality: input.sideQuality ?? null,
+    manualLandmarks: input.manualLandmarks ?? null,
   });
 
   const record: FaceRecord = {
@@ -136,6 +138,7 @@ export const createFace = (input: {
     mediapipeLandmarks: mediapipeLandmarks.length ? mediapipeLandmarks : null,
     frontQuality: input.frontQuality ?? null,
     sideQuality: input.sideQuality ?? null,
+    manualLandmarks: input.manualLandmarks ?? null,
   };
 
   setRecord(id, record);

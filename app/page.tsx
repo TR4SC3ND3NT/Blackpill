@@ -7,6 +7,7 @@ import imageCompression from "browser-image-compression";
 import { useRouter } from "next/navigation";
 import Button from "@/components/Button";
 import Card from "@/components/Card";
+import LandmarkCalibrator from "@/components/LandmarkCalibrator";
 import styles from "./page.module.css";
 import {
   detectLandmarks,
@@ -15,7 +16,13 @@ import {
   loadImageFromDataUrl,
 } from "@/lib/mediapipe";
 import { fetchJson, wait } from "@/lib/api";
-import type { Landmark, PhotoQuality, PoseEstimate, ReasonCode } from "@/lib/types";
+import type {
+  Landmark,
+  ManualLandmarkPoint,
+  PhotoQuality,
+  PoseEstimate,
+  ReasonCode,
+} from "@/lib/types";
 
 type ImageState = {
   dataUrl: string;
@@ -83,6 +90,12 @@ type LandmarkPreviewData = {
   sideScaleApplied: number;
   warnings: string[];
   sideWarning?: string;
+};
+
+type ManualCalibrationResult = {
+  manualPoints: ManualLandmarkPoint[];
+  frontLandmarks: Landmark[];
+  sideLandmarks: Landmark[];
 };
 
 const initialProcessing: ProcessingStep[] = [
@@ -577,6 +590,8 @@ export default function Home() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewStatus, setPreviewStatus] = useState<string | null>(null);
+  const [manualCalibration, setManualCalibration] =
+    useState<ManualCalibrationResult | null>(null);
   const [warmupStatus, setWarmupStatus] = useState<string | null>(null);
   const [warmupError, setWarmupError] = useState<string | null>(null);
   const inFlightRef = useRef(false);
@@ -607,12 +622,16 @@ export default function Home() {
         status: step === 4 ? "active" : step > 4 ? "done" : "inactive",
       },
       {
-        label: "Processing",
+        label: "Calibration",
         status: step === 5 ? "active" : step > 5 ? "done" : "inactive",
       },
       {
+        label: "Processing",
+        status: step === 6 ? "active" : step > 6 ? "done" : "inactive",
+      },
+      {
         label: "Results",
-        status: step > 5 ? "done" : "inactive",
+        status: step > 6 ? "done" : "inactive",
       },
     ],
     [step]
@@ -646,6 +665,7 @@ export default function Home() {
     setPreviewError(null);
     setPreviewData(null);
     setPreviewStatus(null);
+    setManualCalibration(null);
     setWarmupError(null);
     setWarmupStatus(null);
     warmupTriggeredRef.current = false;
@@ -663,6 +683,7 @@ export default function Home() {
     setPreviewError(null);
     setPreviewStatus(null);
     previewRequestKeyRef.current = null;
+    setManualCalibration(null);
   }, [frontImage?.dataUrl, sideImage?.dataUrl]);
 
   useEffect(() => {
@@ -939,6 +960,7 @@ export default function Home() {
 
     let frontLandmarks: Landmark[] = [];
     let sideLandmarks: Landmark[] = [];
+    let manualLandmarks: ManualLandmarkPoint[] | null = null;
     let frontSegmented = frontImage.dataUrl;
     let sideSegmented = sideImage.dataUrl;
     let frontQuality: PhotoQuality | null = null;
@@ -948,8 +970,14 @@ export default function Home() {
       updateProcessing("landmarks", "running");
       try {
         if (previewData) {
-          frontLandmarks = previewData.frontLandmarks;
-          sideLandmarks = previewData.sideLandmarks;
+          if (manualCalibration) {
+            frontLandmarks = manualCalibration.frontLandmarks;
+            sideLandmarks = manualCalibration.sideLandmarks;
+            manualLandmarks = manualCalibration.manualPoints;
+          } else {
+            frontLandmarks = previewData.frontLandmarks;
+            sideLandmarks = previewData.sideLandmarks;
+          }
           frontQuality = previewData.frontQuality;
           sideQuality = previewData.sideQuality;
           const warnings = previewData.warnings.join(" ");
@@ -975,7 +1003,9 @@ export default function Home() {
                 : `${sideMessage} Continuing with low-confidence side analysis.`
             );
           } else {
-            const methodNote = `Landmarks prepared (${previewData.sideMethod}).`;
+            const methodNote = manualCalibration
+              ? `Landmarks calibrated manually (${previewData.sideMethod}).`
+              : `Landmarks prepared (${previewData.sideMethod}).`;
             updateProcessing(
               "landmarks",
               "done",
@@ -995,6 +1025,7 @@ export default function Home() {
           ]);
           frontLandmarks = front.landmarks;
           sideLandmarks = side.landmarks;
+          manualLandmarks = null;
           const [frontCheck, sideCheck] = await Promise.all([
             evaluatePhoto(
               "Front",
@@ -1124,6 +1155,7 @@ export default function Home() {
           mediapipeLandmarks: frontLandmarks,
           frontQuality,
           sideQuality,
+          manualLandmarks,
           gender,
           race,
         }),
@@ -1162,16 +1194,25 @@ export default function Home() {
       setIsProcessing(false);
       inFlightRef.current = false;
     }
-  }, [frontImage, sideImage, gender, race, previewData, router, updateProcessing]);
+  }, [
+    frontImage,
+    sideImage,
+    gender,
+    race,
+    previewData,
+    manualCalibration,
+    router,
+    updateProcessing,
+  ]);
 
   useEffect(() => {
-    if (step !== 5) {
+    if (step !== 6) {
       hasRunRef.current = false;
     }
   }, [step]);
 
   useEffect(() => {
-    if (step === 5 && !hasRunRef.current) {
+    if (step === 6 && !hasRunRef.current) {
       hasRunRef.current = true;
       setIsProcessing(true);
       runPipeline();
@@ -1771,6 +1812,7 @@ export default function Home() {
                       setPreviewError(null);
                       setPreviewData(null);
                       setPreviewStatus(null);
+                      setManualCalibration(null);
                       previewRequestKeyRef.current = null;
                       setError(null);
                       setStep(4);
@@ -2061,7 +2103,7 @@ export default function Home() {
                     }}
                     disabled={!previewData || previewLoading}
                   >
-                    Continue to Analysis
+                    Continue to Calibration
                   </Button>
                   {previewError ? (
                     <Button
@@ -2070,6 +2112,7 @@ export default function Home() {
                         setPreviewError(null);
                         setPreviewData(null);
                         setPreviewStatus(null);
+                        setManualCalibration(null);
                         previewRequestKeyRef.current = null;
                       }}
                     >
@@ -2082,6 +2125,48 @@ export default function Home() {
           ) : null}
 
           {step === 5 ? (
+            <motion.div
+              key="landmark-calibration"
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -12 }}
+              transition={{ duration: 0.35 }}
+            >
+              <Card className={`${styles.homeCard} ${styles.grid}`}>
+                <div>
+                  <strong>Landmark Calibration</strong>
+                  <div className={styles.note}>
+                    Step through each landmark, adjust if needed, and confirm. Required
+                    points must be confirmed before analysis starts.
+                  </div>
+                </div>
+
+                {previewData && frontImage && sideImage ? (
+                  <LandmarkCalibrator
+                    frontImage={frontImage}
+                    sideImage={sideImage}
+                    frontLandmarks={previewData.frontLandmarks}
+                    sideLandmarks={previewData.sideLandmarks}
+                    frontQuality={previewData.frontQuality}
+                    sideQuality={previewData.sideQuality}
+                    initialPoints={manualCalibration?.manualPoints ?? null}
+                    onBack={() => setStep(4)}
+                    onComplete={(result) => {
+                      setManualCalibration(result);
+                      setError(null);
+                      setStep(6);
+                    }}
+                  />
+                ) : (
+                  <div className={styles.note}>
+                    Preview data is missing. Go back and regenerate landmarks first.
+                  </div>
+                )}
+              </Card>
+            </motion.div>
+          ) : null}
+
+          {step === 6 ? (
             <motion.div
               key="processing"
               initial={{ opacity: 0, y: 16 }}
@@ -2132,7 +2217,7 @@ export default function Home() {
                 <div className={styles.actions}>
                   <Button
                     variant="ghost"
-                    onClick={() => setStep(4)}
+                    onClick={() => setStep(5)}
                     disabled={isProcessing}
                   >
                     Back
