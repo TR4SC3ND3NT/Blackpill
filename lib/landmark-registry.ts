@@ -108,7 +108,7 @@ const FRONT_REGISTRY: LandmarkCalibrationDef[] = [
     required: false,
     forceManual: true,
     hairSensitive: true,
-    assetKey: "trichion",
+    assetKey: "forehead",
   },
   {
     id: "forehead",
@@ -479,7 +479,7 @@ const FRONT_REGISTRY: LandmarkCalibrationDef[] = [
     howToFind: "Most anterior point on upper vermillion border.",
     mediapipeIndex: 13,
     required: false,
-    assetKey: "labraleSuperius",
+    assetKey: "cupidsBow",
   },
   {
     id: "labrale_inferius",
@@ -489,7 +489,7 @@ const FRONT_REGISTRY: LandmarkCalibrationDef[] = [
     howToFind: "Most anterior point on lower vermillion border.",
     mediapipeIndex: 14,
     required: true,
-    assetKey: "labraleInferius",
+    assetKey: "lowerLip",
   },
   {
     id: "lower_lip",
@@ -579,7 +579,7 @@ const FRONT_REGISTRY: LandmarkCalibrationDef[] = [
     howToFind: "Lowest median point of chin.",
     mediapipeIndex: 152,
     required: true,
-    assetKey: "menton",
+    assetKey: "chinBottom",
   },
   {
     id: "left_cheek",
@@ -968,9 +968,12 @@ export const getReferenceSources = (
 ) => {
   const gender = normalizeProfileToken(profile.gender, "male");
   const ethnicity = normalizeProfileToken(profile.ethnicity, "white");
-  const local = `/landmarks/${gender}/${ethnicity}/${definition.assetKey}.webp`;
+  const localViewScoped = `/landmarks/${gender}/${ethnicity}/${definition.view}/${definition.assetKey}.webp`;
+  const localLegacy = `/landmarks/${gender}/${ethnicity}/${definition.assetKey}.webp`;
   const remote = `https://beta.faceiqlabs.com/images/landmarks/${gender}/${ethnicity}/${definition.assetKey}.webp?v=1`;
-  return { local, remote };
+  return {
+    sources: dedupe([localViewScoped, localLegacy, remote]),
+  };
 };
 
 type InitArgs = {

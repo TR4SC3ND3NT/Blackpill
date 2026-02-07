@@ -581,20 +581,16 @@ export default function Home() {
         status: step === 3 ? "active" : step > 3 ? "done" : "inactive",
       },
       {
-        label: "Landmarks",
+        label: "Calibration",
         status: step === 4 ? "active" : step > 4 ? "done" : "inactive",
       },
       {
-        label: "Calibration",
+        label: "Processing",
         status: step === 5 ? "active" : step > 5 ? "done" : "inactive",
       },
       {
-        label: "Processing",
-        status: step === 6 ? "active" : step > 6 ? "done" : "inactive",
-      },
-      {
         label: "Results",
-        status: step > 6 ? "done" : "inactive",
+        status: step > 5 ? "done" : "inactive",
       },
     ],
     [step]
@@ -1169,13 +1165,13 @@ export default function Home() {
   ]);
 
   useEffect(() => {
-    if (step !== 6) {
+    if (step !== 5) {
       hasRunRef.current = false;
     }
   }, [step]);
 
   useEffect(() => {
-    if (step === 6 && !hasRunRef.current) {
+    if (step === 5 && !hasRunRef.current) {
       hasRunRef.current = true;
       setIsProcessing(true);
       runPipeline();
@@ -1781,7 +1777,7 @@ export default function Home() {
                       setStep(4);
                     }}
                   >
-                    Preview Landmarks
+                    Start Calibration
                   </Button>
                 </div>
                 {warmupStatus ? (
@@ -1794,140 +1790,6 @@ export default function Home() {
 
           {step === 4 ? (
             <motion.div
-              key="landmark-preview"
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -12 }}
-              transition={{ duration: 0.35 }}
-            >
-              <Card className={`${styles.homeCard} ${styles.grid}`}>
-                <div>
-                  <strong>Auto Landmark Preparation</strong>
-                  <div className={styles.note}>
-                    MediaPipe prepared initial points for both photos. The next step is
-                    manual calibration using front/side landmark registries.
-                  </div>
-                </div>
-
-                {previewData && frontImage && sideImage ? (
-                  <div className={styles.landmarkReviewGrid}>
-                    <div className={styles.landmarkCard}>
-                      <div className={styles.landmarkTitleRow}>
-                        <strong>Front Auto Detection</strong>
-                        <span className={styles.debugValue}>
-                          {previewData.frontLandmarks.length} landmarks
-                        </span>
-                      </div>
-                      <div className={styles.preview}>
-                        <img src={frontImage.dataUrl} alt="Front preview" />
-                      </div>
-                      <div className={styles.debugPanel}>
-                        <div className={styles.debugRow}>
-                          <span className={styles.debugLabel}>method</span>
-                          <span className={styles.debugValue}>{previewData.frontMethod}</span>
-                        </div>
-                        <div className={styles.debugRow}>
-                          <span className={styles.debugLabel}>pose</span>
-                          <span className={styles.debugValue}>
-                            y{formatNumber(previewData.frontQuality.poseYaw)} p
-                            {formatNumber(previewData.frontQuality.posePitch)} r
-                            {formatNumber(previewData.frontQuality.poseRoll)}
-                          </span>
-                        </div>
-                        <div className={styles.debugRow}>
-                          <span className={styles.debugLabel}>view</span>
-                          <span className={styles.debugValue}>
-                            {previewData.frontQuality.detectedView}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                    <div className={styles.landmarkCard}>
-                      <div className={styles.landmarkTitleRow}>
-                        <strong>Side Auto Detection</strong>
-                        <span className={styles.debugValue}>
-                          {previewData.sideLandmarks.length} landmarks
-                        </span>
-                      </div>
-                      <div className={styles.preview}>
-                        <img src={sideImage.dataUrl} alt="Side preview" />
-                      </div>
-                      <div className={styles.debugPanel}>
-                        <div className={styles.debugRow}>
-                          <span className={styles.debugLabel}>method</span>
-                          <span className={styles.debugValue}>{previewData.sideMethod}</span>
-                        </div>
-                        <div className={styles.debugRow}>
-                          <span className={styles.debugLabel}>bbox</span>
-                          <span className={styles.debugValue}>
-                            {formatBbox(previewData.sideBbox)}
-                          </span>
-                        </div>
-                        <div className={styles.debugRow}>
-                          <span className={styles.debugLabel}>pose</span>
-                          <span className={styles.debugValue}>
-                            y{formatNumber(previewData.sideQuality.poseYaw)} p
-                            {formatNumber(previewData.sideQuality.posePitch)} r
-                            {formatNumber(previewData.sideQuality.poseRoll)}
-                          </span>
-                        </div>
-                        <div className={styles.debugRow}>
-                          <span className={styles.debugLabel}>view</span>
-                          <span className={styles.debugValue}>
-                            {previewData.sideQuality.detectedView}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
-
-                {previewStatus ? (
-                  <div className={styles.note}>Status: {previewStatus}</div>
-                ) : null}
-                {previewLoading ? <div className={styles.note}>Preparing preview...</div> : null}
-                {previewError ? <div className={styles.error}>{previewError}</div> : null}
-
-                {error ? <div className={styles.error}>{error}</div> : null}
-
-                <div className={styles.actions}>
-                  <Button variant="ghost" onClick={() => setStep(3)}>
-                    Back
-                  </Button>
-                  <Button
-                    onClick={() => {
-                      if (!previewData) {
-                        setError("Landmark preview is not ready yet.");
-                        return;
-                      }
-                      setError(null);
-                      setStep(5);
-                    }}
-                    disabled={!previewData || previewLoading}
-                  >
-                    Continue to Calibration
-                  </Button>
-                  {previewError ? (
-                    <Button
-                      variant="ghost"
-                      onClick={() => {
-                        setPreviewError(null);
-                        setPreviewData(null);
-                        setPreviewStatus(null);
-                        setManualCalibration(null);
-                        previewRequestKeyRef.current = null;
-                      }}
-                    >
-                      Retry
-                    </Button>
-                  ) : null}
-                </div>
-              </Card>
-            </motion.div>
-          ) : null}
-
-          {step === 5 ? (
-            <motion.div
               key="landmark-calibration"
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
@@ -1938,10 +1800,22 @@ export default function Home() {
                 <div>
                   <strong>Landmark Calibration</strong>
                   <div className={styles.note}>
-                    Step through each landmark, adjust if needed, and confirm. Required
-                    points must be confirmed before analysis starts.
+                    Calibration runs in two passes: FRONT landmarks first, then SIDE/profile
+                    landmarks. Each step shows one active point only.
                   </div>
                 </div>
+
+                {previewStatus ? (
+                  <div className={styles.note}>Status: {previewStatus}</div>
+                ) : null}
+                {previewLoading ? (
+                  <div className={styles.note}>
+                    Preparing auto landmarks for calibration...
+                  </div>
+                ) : null}
+                {previewError ? <div className={styles.error}>{previewError}</div> : null}
+
+                {error ? <div className={styles.error}>{error}</div> : null}
 
                 {previewData && frontImage && sideImage ? (
                   <LandmarkCalibrator
@@ -1953,23 +1827,37 @@ export default function Home() {
                     sideQuality={previewData.sideQuality}
                     profile={{ gender: gender || "male", ethnicity: race || "white" }}
                     initialPoints={manualCalibration?.manualPoints ?? null}
-                    onBack={() => setStep(4)}
+                    onBack={() => setStep(3)}
                     onComplete={(result) => {
                       setManualCalibration(result);
                       setError(null);
-                      setStep(6);
+                      setStep(5);
                     }}
                   />
                 ) : (
-                  <div className={styles.note}>
-                    Preview data is missing. Go back and regenerate landmarks first.
+                  <div className={styles.actions}>
+                    <Button variant="ghost" onClick={() => setStep(3)}>
+                      Back
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      onClick={() => {
+                        setPreviewError(null);
+                        setPreviewData(null);
+                        setPreviewStatus(null);
+                        setManualCalibration(null);
+                        previewRequestKeyRef.current = null;
+                      }}
+                    >
+                      Retry Preparation
+                    </Button>
                   </div>
                 )}
               </Card>
             </motion.div>
           ) : null}
 
-          {step === 6 ? (
+          {step === 5 ? (
             <motion.div
               key="processing"
               initial={{ opacity: 0, y: 16 }}
@@ -2020,7 +1908,7 @@ export default function Home() {
                 <div className={styles.actions}>
                   <Button
                     variant="ghost"
-                    onClick={() => setStep(5)}
+                    onClick={() => setStep(4)}
                     disabled={isProcessing}
                   >
                     Back
