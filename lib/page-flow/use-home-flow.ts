@@ -32,8 +32,7 @@ import {
 const initialProcessing: ProcessingStepType[] = [
   { key: "landmarks", label: "Detecting landmarks", status: "pending" },
   { key: "orientation", label: "Estimating side orientation", status: "pending" },
-  { key: "background", label: "Refining background", status: "pending" },
-  { key: "analysis", label: "Creating analysis", status: "pending" },
+  { key: "analysis", label: "Scoring (60+ ratios vs cohort)", status: "pending" },
   { key: "save", label: "Saving landmark package", status: "pending" },
 ];
 
@@ -440,13 +439,11 @@ export function useHomeFlow(): UseHomeFlowResult {
     setProcessingSteps(initialProcessing);
     setError(null);
 
-    let frontLandmarks: Landmark[] = [];
-    let sideLandmarks: Landmark[] = [];
-    let manualLandmarks: ManualLandmarkPoint[] | null = null;
-    let frontSegmented = frontImage.dataUrl;
-    let sideSegmented = sideImage.dataUrl;
-    let frontQuality: PhotoQuality | null = null;
-    let sideQuality: PhotoQuality | null = null;
+	    let frontLandmarks: Landmark[] = [];
+	    let sideLandmarks: Landmark[] = [];
+	    let manualLandmarks: ManualLandmarkPoint[] | null = null;
+	    let frontQuality: PhotoQuality | null = null;
+	    let sideQuality: PhotoQuality | null = null;
 
     try {
       updateProcessing("landmarks", "running");
@@ -605,25 +602,6 @@ export function useHomeFlow(): UseHomeFlowResult {
         updateProcessing("orientation", "error", "Orientation fallback enabled.");
       }
 
-      updateProcessing("background", "running");
-      try {
-        const [frontRes, sideRes] = await Promise.all([
-          fetchJson<{ success: boolean; image: string }>("/api/background-removal", {
-            method: "POST",
-            body: JSON.stringify({ image: frontImage.dataUrl, quality: 0.8 }),
-          }),
-          fetchJson<{ success: boolean; image: string }>("/api/background-removal", {
-            method: "POST",
-            body: JSON.stringify({ image: sideImage.dataUrl, quality: 0.8 }),
-          }),
-        ]);
-        frontSegmented = frontRes.image ?? frontSegmented;
-        sideSegmented = sideRes.image ?? sideSegmented;
-        updateProcessing("background", "done");
-      } catch {
-        updateProcessing("background", "error", "Background retained.");
-      }
-
       updateProcessing("analysis", "running");
       const cohortEthnicity = race ? race.replace(/-/g, "_") : "white";
       const cohortGender = gender || "male";
@@ -633,8 +611,6 @@ export function useHomeFlow(): UseHomeFlowResult {
         body: JSON.stringify({
           frontPhotoUrl: frontImage.dataUrl,
           sidePhotoUrl: sideImage.dataUrl,
-          frontPhotoSegmentedUrl: frontSegmented,
-          sidePhotoSegmentedUrl: sideSegmented,
           frontLandmarks,
           sideLandmarks,
           mediapipeLandmarks: frontLandmarks,
