@@ -14,10 +14,20 @@ const baseDir = path.join(
 );
 
 const assets = new Set<string>();
+const owners = new Map<string, string[]>();
+
+const addAsset = (asset: string, owner: string) => {
+  if (!asset) return;
+  assets.add(asset);
+  const existing = owners.get(asset) ?? [];
+  existing.push(owner);
+  owners.set(asset, existing);
+};
+
 for (const def of LANDMARK_CALIBRATION_REGISTRY) {
-  if (def.referenceAsset) assets.add(def.referenceAsset);
+  addAsset(def.referenceAsset, def.id);
   for (const fallback of def.referenceFallbackAssets ?? []) {
-    if (fallback) assets.add(fallback);
+    addAsset(fallback, def.id);
   }
 }
 
@@ -29,7 +39,12 @@ for (const asset of Array.from(assets).sort()) {
 
 if (missing.length) {
   console.error(`FAIL: missing ${missing.length} reference assets`);
-  for (const file of missing) console.error(`- ${file}`);
+  for (const file of missing) {
+    const assetName = path.basename(file);
+    const usedBy = owners.get(assetName) ?? [];
+    const suffix = usedBy.length ? ` (used by: ${usedBy.join(", ")})` : "";
+    console.error(`- ${file}${suffix}`);
+  }
   process.exit(1);
 }
 
