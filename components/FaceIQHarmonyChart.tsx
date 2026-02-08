@@ -7,23 +7,16 @@ const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
 const formatInt = (value?: number) =>
   value == null || !Number.isFinite(value) ? "--" : Math.round(value).toString();
 
-type Ring = {
-  key: string;
-  label: string;
-  value?: number;
-  color: string;
-};
-
 export default function FaceIQHarmonyChart({
   overall,
   harmony,
   angularity,
   dimorphism,
   features,
-  size = 240,
+  size = 320,
   className,
-  title = "Overall percentile",
-  subtitle = "FaceIQ-style radial overview.",
+  title,
+  subtitle,
 }: {
   overall?: number;
   harmony?: number;
@@ -35,119 +28,124 @@ export default function FaceIQHarmonyChart({
   title?: string;
   subtitle?: string;
 }) {
-  const rings = useMemo<Ring[]>(
-    () => [
-      { key: "harmony", label: "Harmony", value: harmony, color: "#22C55E" },
-      { key: "angularity", label: "Angularity", value: angularity, color: "#7C5CFF" },
-      { key: "dimorphism", label: "Dimorphism", value: dimorphism, color: "#FF8A4C" },
-      { key: "features", label: "Features", value: features, color: "#3B82F6" },
-    ],
-    [harmony, angularity, dimorphism, features]
-  );
-
-  const numericOverall =
-    overall ??
-    (() => {
-      const values = rings
-        .map((ring) => ring.value)
-        .filter((value): value is number => value != null && Number.isFinite(value));
-      return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : undefined;
-    })();
-
-  const viewBox = `0 0 ${size} ${size}`;
-  const center = size / 2;
-
-  const baseRadius = Math.floor(size * 0.38);
-  const ringGap = Math.max(6, Math.floor(size * 0.03));
-  const strokeWidth = Math.max(10, Math.floor(size * 0.06));
-
-  const backgroundStroke = "rgba(15, 23, 42, 0.10)";
-
-  const renderRing = (ring: Ring, index: number) => {
-    const value = ring.value;
-    if (value == null || !Number.isFinite(value)) return null;
-    const pct = clamp01(value / 100);
-    const radius = baseRadius - index * ringGap;
-    const circumference = 2 * Math.PI * radius;
-    const dash = circumference * pct;
-    const gap = Math.max(0, circumference - dash);
-
-    return (
-      <g key={ring.key} transform={`rotate(-90 ${center} ${center})`}>
-        <circle
-          cx={center}
-          cy={center}
-          r={radius}
-          fill="none"
-          stroke={backgroundStroke}
-          strokeWidth={strokeWidth}
-          strokeLinecap="round"
-        />
-        <circle
-          cx={center}
-          cy={center}
-          r={radius}
-          fill="none"
-          stroke={ring.color}
-          strokeWidth={strokeWidth}
-          strokeLinecap="round"
-          strokeDasharray={`${dash} ${gap}`}
-        />
-      </g>
+  const numericOverall = useMemo(() => {
+    if (overall != null && Number.isFinite(overall)) return overall;
+    const values = [harmony, angularity, dimorphism, features].filter(
+      (value): value is number => value != null && Number.isFinite(value)
     );
-  };
+    if (!values.length) return undefined;
+    return values.reduce((sum, value) => sum + value, 0) / values.length;
+  }, [overall, harmony, angularity, dimorphism, features]);
+
+  const progress = clamp01((numericOverall ?? 0) / 100);
+
+  const vb = 300;
+  const center = vb / 2;
+  const radius = 120;
+  const strokeWidth = 30;
+  const circumference = 2 * Math.PI * radius;
+  const dash = circumference * progress;
 
   return (
     <div className={className} style={{ display: "grid", gap: 12, placeItems: "center" }}>
-      <div style={{ width: "100%", display: "grid", gap: 4, textAlign: "left" }}>
-        <div style={{ fontWeight: 700, color: "rgba(15, 23, 42, 0.88)" }}>{title}</div>
-        <div style={{ fontSize: 12, color: "rgba(15, 23, 42, 0.55)" }}>{subtitle}</div>
-      </div>
-
+      {title || subtitle ? (
+        <div style={{ width: "100%", display: "grid", gap: 4, textAlign: "left" }}>
+          {title ? (
+            <div style={{ fontWeight: 700, color: "rgba(15, 23, 42, 0.88)" }}>{title}</div>
+          ) : null}
+          {subtitle ? (
+            <div style={{ fontSize: 12, color: "rgba(15, 23, 42, 0.55)" }}>{subtitle}</div>
+          ) : null}
+        </div>
+      ) : null}
       <svg
-        viewBox={viewBox}
+        viewBox={`0 0 ${vb} ${vb}`}
         width={size}
         height={size}
         style={{
           borderRadius: 22,
-          background:
-            "radial-gradient(circle at 20% 20%, rgba(124, 92, 255, 0.10), transparent 55%), radial-gradient(circle at 80% 10%, rgba(255, 138, 76, 0.10), transparent 60%), radial-gradient(circle at 70% 80%, rgba(34, 197, 94, 0.10), transparent 55%), rgba(255,255,255,0.55)",
+          background: [
+            "radial-gradient(circle at 18% 20%, rgba(255, 107, 53, 0.18), transparent 58%)",
+            "radial-gradient(circle at 78% 18%, rgba(255, 183, 3, 0.12), transparent 62%)",
+            "rgba(255,255,255,0.62)",
+          ].join(", "),
           border: "1px solid rgba(255,255,255,0.65)",
           boxShadow: "0 16px 40px rgba(15,23,42,0.08)",
           backdropFilter: "blur(10px)",
         }}
       >
-        {rings.map(renderRing)}
+        <defs>
+          <linearGradient id="faceiqOrange" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor="#FFB703" />
+            <stop offset="60%" stopColor="#FF7A2F" />
+            <stop offset="100%" stopColor="#FF6B35" />
+          </linearGradient>
+          <filter id="faceiqGlow" x="-40%" y="-40%" width="180%" height="180%">
+            <feGaussianBlur stdDeviation="2.8" result="blur" />
+            <feColorMatrix
+              in="blur"
+              type="matrix"
+              values="1 0 0 0 0  0 0.65 0 0 0  0 0 0.3 0 0  0 0 0 0.9 0"
+              result="colored"
+            />
+            <feMerge>
+              <feMergeNode in="colored" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+        </defs>
 
-        <circle
-          cx={center}
-          cy={center}
-          r={Math.max(1, baseRadius - ringGap * 4 - strokeWidth * 0.6)}
-          fill="rgba(255,255,255,0.78)"
-          stroke="rgba(255,255,255,0.85)"
-        />
+        <g transform={`rotate(-90 ${center} ${center})`}>
+          <circle
+            cx={center}
+            cy={center}
+            r={radius}
+            fill="none"
+            stroke="rgba(15, 23, 42, 0.10)"
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+          />
+          <circle
+            cx={center}
+            cy={center}
+            r={radius}
+            fill="none"
+            stroke="url(#faceiqOrange)"
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+            strokeDasharray={`${dash} ${Math.max(0, circumference - dash)}`}
+            filter="url(#faceiqGlow)"
+          />
+        </g>
+
+        <circle cx={center} cy={center} r={96} fill="rgba(255,255,255,0.82)" stroke="rgba(255,255,255,0.88)" />
 
         <text
           x={center}
-          y={center + 10}
+          y={center + 12}
           textAnchor="middle"
-          style={{ fontSize: Math.floor(size * 0.22), fontWeight: 800, fill: "#0F172A" }}
+          style={{ fontSize: 66, fontWeight: 900, fill: "#0F172A" }}
         >
           {formatInt(numericOverall)}
         </text>
         <text
           x={center}
-          y={center - 22}
+          y={center - 24}
           textAnchor="middle"
-          style={{ fontSize: 12, fontWeight: 700, fill: "rgba(15,23,42,0.58)", letterSpacing: "0.08em" }}
+          style={{
+            fontSize: 12,
+            fontWeight: 800,
+            fill: "rgba(15,23,42,0.62)",
+            letterSpacing: "0.18em",
+          }}
         >
           OVERALL
         </text>
         <text
           x={center}
-          y={center + 36}
+          y={center + 44}
           textAnchor="middle"
-          style={{ fontSize: 12, fontWeight: 700, fill: "rgba(15,23,42,0.50)" }}
+          style={{ fontSize: 14, fontWeight: 800, fill: "rgba(15,23,42,0.55)" }}
         >
           / 100
         </text>
@@ -155,4 +153,3 @@ export default function FaceIQHarmonyChart({
     </div>
   );
 }
-

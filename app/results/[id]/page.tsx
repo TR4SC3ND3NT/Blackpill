@@ -390,12 +390,7 @@ export default function ResultsOverviewPage() {
           <div className={styles.chartCard}>
             <FaceIQHarmonyChart
               overall={face.overallScore}
-              harmony={face.harmonyScore}
-              angularity={face.angularityScore}
-              dimorphism={face.dimorphismScore}
-              features={face.featuresScore}
-              title="Harmony radial"
-              subtitle="Radial pillars snapshot."
+              size={320}
             />
           </div>
         </motion.div>
