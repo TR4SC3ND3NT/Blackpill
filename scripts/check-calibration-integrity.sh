@@ -25,18 +25,7 @@ if ! rg -n "strictManual" lib/scoring.ts >/dev/null; then
 fi
 
 echo "[4/5] Check registry asset files exist"
-node - <<'NODE'
-const fs=require('fs');
-const txt=fs.readFileSync('lib/landmark-registry.ts','utf8');
-const keys=[...txt.matchAll(/assetKey:\s*"([^"]+)"/g)].map(m=>m[1]);
-const uniq=[...new Set(keys)];
-const missing=uniq.filter(k=>!fs.existsSync(`public/landmarks/male/white/${k}.webp`));
-if(missing.length){
-  console.error('FAIL: missing assets:', missing.join(', '));
-  process.exit(1);
-}
-console.log(`OK: ${uniq.length} asset keys mapped`);
-NODE
+npm run -s check:refs
 
 echo "[5/5] Check single-point step mode markers"
 if ! rg -n "isStepPhase\(phase\).*activePoint|Continue to Side/Profile|Continue to Analysis" components/LandmarkCalibrator.tsx >/dev/null; then

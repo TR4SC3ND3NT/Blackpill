@@ -2,14 +2,12 @@
 set -euo pipefail
 
 if [ "$#" -lt 1 ]; then
-  echo "Usage: $0 <urls-file> [gender] [ethnicity]"
+  echo "Usage: $0 <urls-file>"
   exit 1
 fi
 
 URL_FILE="$1"
-GENDER="${2:-male}"
-ETHNICITY="${3:-white}"
-OUT_DIR="public/landmarks/${GENDER}/${ETHNICITY}"
+OUT_DIR="public/landmarks/reference"
 
 mkdir -p "$OUT_DIR"
 

@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "check:refs": "tsx scripts/check-reference-integrity.ts",
     "test:scoring": "tsx --test tests/scoring.test.ts",
     "test:pose": "tsx --test tests/pose.test.ts",
     "test": "npm run test:pose && npm run test:scoring"
