@@ -134,55 +134,47 @@ export default function ResultsOverviewPage() {
   const strengths = sorted.slice(0, 3);
   const weaknesses = sorted.slice(-3).reverse();
 
-  const cohortKey = useMemo(() => {
-    const fromQuality =
-      ((face.frontQuality as unknown as { cohortKey?: CohortKey } | null | undefined)?.cohortKey ??
-        (face.sideQuality as unknown as { cohortKey?: CohortKey } | null | undefined)?.cohortKey) as
-        | CohortKey
-        | undefined;
-    if (fromQuality) return fromQuality;
+  const fromQuality =
+    (face.frontQuality as unknown as { cohortKey?: CohortKey } | null | undefined)?.cohortKey ??
+    (face.sideQuality as unknown as { cohortKey?: CohortKey } | null | undefined)?.cohortKey;
+  const ethnicity = face.race ? face.race.replace(/-/g, "_") : "white";
+  const genderKey = face.gender || "male";
+  const derivedCohortKey = `${ethnicity}_${genderKey}_young` as CohortKey;
 
-    const ethnicity = face.race ? face.race.replace(/-/g, "_") : "white";
-    const genderKey = face.gender || "male";
-    const derived = `${ethnicity}_${genderKey}_young` as CohortKey;
-    return derived in FACEIQ_COHORTS ? derived : DEFAULT_COHORT_KEY;
-  }, [face.frontQuality, face.sideQuality, face.race, face.gender]);
+  const cohortKey =
+    (fromQuality && fromQuality in FACEIQ_COHORTS
+      ? fromQuality
+      : derivedCohortKey in FACEIQ_COHORTS
+        ? derivedCohortKey
+        : DEFAULT_COHORT_KEY) satisfies CohortKey;
 
   const cohort = FACEIQ_COHORTS[cohortKey] ?? FACEIQ_COHORTS[DEFAULT_COHORT_KEY];
 
-  const cohortRows = useMemo(() => {
-    const metrics = face.metricDiagnostics ?? [];
+  const pickMetricValue = (id: string) =>
+    face.metricDiagnostics?.find((metric) => metric.id === id)?.value ?? null;
+  const asNum = (value: number | null) =>
+    value == null || !Number.isFinite(value) ? null : value;
+  const formatSigned = (value: number, digits = 2) =>
+    `${value >= 0 ? "+" : ""}${value.toFixed(digits)}`;
 
-    const pick = (id: string) => metrics.find((metric) => metric.id === id)?.value ?? null;
-    const asNum = (value: number | null) => (value == null || !Number.isFinite(value) ? null : value);
-    const formatSigned = (value: number, digits = 2) =>
-      `${value >= 0 ? "+" : ""}${value.toFixed(digits)}`;
-
-    const fWHR = asNum(pick("fWHR"));
-    const gonial = asNum(pick("gonialAngleAvg"));
-
-    const fWHRIdeal = (cohort as unknown as Record<string, number>).fWHR ?? null;
-    const gonialIdeal = (cohort as unknown as Record<string, number>).gonialAngleAvg ?? null;
-
-    return [
-      {
-        key: "fWHR",
-        label: "fWHR",
-        value: fWHR,
-        ideal: fWHRIdeal,
-        format: (value: number) => value.toFixed(2),
-        formatDiff: (delta: number) => formatSigned(delta, 2),
-      },
-      {
-        key: "gonialAngleAvg",
-        label: "Gonial angle",
-        value: gonial,
-        ideal: gonialIdeal,
-        format: (value: number) => `${Math.round(value)}°`,
-        formatDiff: (delta: number) => `${delta >= 0 ? "+" : ""}${Math.round(delta)}°`,
-      },
-    ];
-  }, [face.metricDiagnostics, cohort]);
+  const cohortRows = [
+    {
+      key: "fWHR",
+      label: "fWHR",
+      value: asNum(pickMetricValue("fWHR")),
+      ideal: (cohort as unknown as Record<string, number>).fWHR ?? null,
+      format: (value: number) => value.toFixed(2),
+      formatDiff: (delta: number) => formatSigned(delta, 2),
+    },
+    {
+      key: "gonialAngleAvg",
+      label: "Gonial angle",
+      value: asNum(pickMetricValue("gonialAngleAvg")),
+      ideal: (cohort as unknown as Record<string, number>).gonialAngleAvg ?? null,
+      format: (value: number) => `${Math.round(value)}°`,
+      formatDiff: (delta: number) => `${delta >= 0 ? "+" : ""}${Math.round(delta)}°`,
+    },
+  ];
 
   return (
     <>
