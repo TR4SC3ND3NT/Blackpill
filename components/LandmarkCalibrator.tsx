@@ -49,7 +49,87 @@ type ViewBox = {
   height: number;
 };
 
+type BBox = {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+  width: number;
+  height: number;
+};
+
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
+
+const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+
+const normalizeLandmarksForImage = (
+  points: Array<{ x: number; y: number }>,
+  width: number,
+  height: number
+) => {
+  if (!points.length) return [];
+  const maxX = Math.max(...points.map((pt) => pt.x));
+  const maxY = Math.max(...points.map((pt) => pt.y));
+  const normalized = maxX <= 2 && maxY <= 2;
+  if (normalized) {
+    return points.map((pt) => ({ x: pt.x, y: pt.y }));
+  }
+  const safeW = Math.max(1, width);
+  const safeH = Math.max(1, height);
+  return points.map((pt) => ({
+    x: pt.x / safeW,
+    y: pt.y / safeH,
+  }));
+};
+
+const computeBBox = (points: Array<{ x: number; y: number }>): BBox | null => {
+  const valid = points.filter(
+    (pt) =>
+      Number.isFinite(pt.x) &&
+      Number.isFinite(pt.y) &&
+      pt.x >= 0 &&
+      pt.x <= 1 &&
+      pt.y >= 0 &&
+      pt.y <= 1
+  );
+  if (!valid.length) return null;
+  const xs = valid.map((pt) => pt.x);
+  const ys = valid.map((pt) => pt.y);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  return {
+    minX,
+    minY,
+    maxX,
+    maxY,
+    width: Math.max(1e-6, maxX - minX),
+    height: Math.max(1e-6, maxY - minY),
+  };
+};
+
+const fitWithPadding = (bbox: BBox, padding: number): ViewBox => {
+  const pad = clamp(padding, 0.04, 0.22);
+  const width = clamp(bbox.width + pad * 2, 0.2, 1);
+  const height = clamp(bbox.height + pad * 2, 0.2, 1);
+  const x = clamp(bbox.minX - pad, 0, 1 - width);
+  const y = clamp(bbox.minY - pad, 0, 1 - height);
+  return { x, y, width, height };
+};
+
+const smartFaceViewBox = (params: {
+  landmarks: Array<{ x: number; y: number }>;
+  imageWidth: number;
+  imageHeight: number;
+}): ViewBox => {
+  const normalized = normalizeLandmarksForImage(params.landmarks, params.imageWidth, params.imageHeight);
+  const bbox = computeBBox(normalized);
+  if (!bbox) return { x: 0, y: 0, width: 1, height: 1 };
+  // Pad so the face fills ~70-80% of the viewport.
+  const padding = bbox.height * 0.15;
+  return fitWithPadding(bbox, padding);
+};
 
 const hasLowConfidenceWarning = (point: ManualLandmarkPoint) => {
   if (point.confidence < 0.58) return true;
@@ -119,7 +199,7 @@ export default function LandmarkCalibrator({
     key: string;
     missing: string;
   } | null>(null);
-  const [zoomLevel, setZoomLevel] = useState<1 | 2 | 4>(2);
+  const [zoomLevel, setZoomLevel] = useState<1 | 2 | 4>(1);
   const [dragging, setDragging] = useState(false);
 
   const stageRef = useRef<HTMLDivElement | null>(null);
@@ -151,6 +231,17 @@ export default function LandmarkCalibrator({
       ? sideImage
       : frontImage;
 
+  const smartBaseViewBox = useMemo<ViewBox>(() => {
+    if (!isStepPhase(phase)) return { x: 0, y: 0, width: 1, height: 1 };
+    const landmarks = currentView === "side" ? sideLandmarks : frontLandmarks;
+    if (!landmarks.length) return { x: 0, y: 0, width: 1, height: 1 };
+    return smartFaceViewBox({
+      landmarks,
+      imageWidth: activeImage.width,
+      imageHeight: activeImage.height,
+    });
+  }, [phase, currentView, frontLandmarks, sideLandmarks, activeImage.width, activeImage.height]);
+
   const pointsForCurrentView = useMemo(
     () => points.filter((point) => point.view === currentView),
     [points, currentView]
@@ -173,20 +264,26 @@ export default function LandmarkCalibrator({
       return { x: 0, y: 0, width: 1, height: 1 };
     }
 
-    const width = 1 / zoomLevel;
-    const height = 1 / zoomLevel;
+    const base = smartBaseViewBox;
+    const width = base.width / zoomLevel;
+    const height = base.height / zoomLevel;
     const halfW = width / 2;
     const halfH = height / 2;
-    const cx = Math.max(halfW, Math.min(1 - halfW, activePoint.x));
-    const cy = Math.max(halfH, Math.min(1 - halfH, activePoint.y));
+
+    const minCx = base.x + halfW;
+    const maxCx = base.x + base.width - halfW;
+    const minCy = base.y + halfH;
+    const maxCy = base.y + base.height - halfH;
+    const cx = clamp(activePoint.x, minCx, maxCx);
+    const cy = clamp(activePoint.y, minCy, maxCy);
 
     return {
-      x: clamp01(cx - halfW),
-      y: clamp01(cy - halfH),
+      x: clamp(cx - halfW, 0, 1 - width),
+      y: clamp(cy - halfH, 0, 1 - height),
       width,
       height,
     };
-  }, [phase, activePoint, zoomLevel]);
+  }, [phase, activePoint, zoomLevel, smartBaseViewBox]);
 
   const updatePoint = useCallback((index: number, patch: Partial<ManualLandmarkPoint>) => {
     setPoints((prev) =>
@@ -505,7 +602,7 @@ export default function LandmarkCalibrator({
               <circle
                 cx={activePoint.x}
                 cy={activePoint.y}
-                r={pointRadius}
+                r={pointRadius * 1.5}
                 className={styles.pointActive}
               />
             ) : null}
@@ -603,6 +700,7 @@ export default function LandmarkCalibrator({
                       key={`${activePoint.id}:${referenceSrc}`}
                       src={referenceSrc}
                       alt={`Reference for ${activePoint.name}`}
+                      className={styles.referenceImg}
                       data-fallback-index="1"
                       onError={(event) => {
                         const target = event.currentTarget as HTMLImageElement;

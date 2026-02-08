@@ -64,9 +64,10 @@
 }
 
 .pointActive {
-  fill: rgba(236, 73, 73, 1);
-  stroke: rgba(255, 255, 255, 1);
-  stroke-width: 0.0007;
+  fill: #ef4444;
+  stroke: #b91c1c;
+  stroke-width: 0.0016;
+  filter: drop-shadow(0 2px 4px rgba(185, 28, 28, 0.35));
 }
 
 .stageFooter {
@@ -184,7 +185,6 @@
   position: relative;
   height: 220px;
   border-radius: 12px;
-  overflow: hidden;
   background: #dfe2e8;
   margin: 12px;
   border: 1px solid rgba(12, 24, 46, 0.1);
@@ -192,9 +192,11 @@
   place-items: center;
 }
 
-.referencePreviewStatic img {
-  width: 100%;
-  height: 100%;
+.referenceImg {
+  width: auto;
+  max-width: 280px;
+  height: auto;
+  max-height: 100%;
   object-fit: contain;
 }
 
