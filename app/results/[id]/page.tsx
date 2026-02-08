@@ -5,7 +5,7 @@ import styles from "./results.module.css";
 import PillarCardsRow from "./_components/PillarCardsRow";
 import OverallScorePanel from "./_components/OverallScorePanel";
 import FaceThumbs from "./_components/FaceThumbs";
-import DistributionChart from "./_components/DistributionChart";
+import FaceIQHarmonyChart from "@/components/FaceIQHarmonyChart";
 import PillarBreakdownChart from "./_components/PillarBreakdownChart";
 import BalanceChart from "./_components/BalanceChart";
 import ProsConsPanel from "./_components/ProsConsPanel";
@@ -139,7 +139,17 @@ export default function ResultsOverviewPage() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ ...baseTransition, delay: 0.15 }}
         >
-          <DistributionChart locked={locked} score={face.overallScore} />
+          <div className={styles.chartCard}>
+            <FaceIQHarmonyChart
+              overall={face.overallScore}
+              harmony={face.harmonyScore}
+              angularity={face.angularityScore}
+              dimorphism={face.dimorphismScore}
+              features={face.featuresScore}
+              title="Harmony radial"
+              subtitle="Radial pillars snapshot."
+            />
+          </div>
         </motion.div>
       </div>
 
