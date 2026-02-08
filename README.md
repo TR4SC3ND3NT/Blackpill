@@ -23,6 +23,18 @@ By default the app tries local assets first and falls back to CDN/model URLs.
 
 If local assets are missing, internet access is required to load MediaPipe runtime/models.
 
+## Landmark Reference Assets
+
+Landmark Calibration uses static, universal reference images stored locally:
+
+- `public/landmarks/reference`
+
+To verify the registry maps to real files:
+
+```bash
+npm run check:refs
+```
+
 ## Optional Persistence
 
 Set `FACE_STORE_PERSIST=1` to persist the in-memory store to `.data/faces.json`.
