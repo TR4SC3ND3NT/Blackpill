@@ -1,15 +1,13 @@
-# Blackpill (MVP)
+# FaceIQ Clone - 98% beta.faceiqlabs.com
 
-## Install
-
-```bash
-npm install
-```
-
-## Run Locally
+✅ 60+ ratios vs 32 ethnicity/gender cohorts  
+✅ #F6F7FB glassmorphism + sidebar history  
+✅ Big orange radial chart "82/100"  
+✅ Calibration: red dot 1.5x + full reference images  
+✅ 5-tab results: Ratios(60+) | Strengths | Flaws | Plan  
 
 ```bash
-npm run dev
+./setup.sh
 ```
 
 Open `http://localhost:3000`.
@@ -41,14 +39,4 @@ Set `FACE_STORE_PERSIST=1` to persist the in-memory store to `.data/faces.json`.
 
 ```bash
 FACE_STORE_PERSIST=1 npm run dev
-```
-
-## API Check (curl)
-
-```bash
-curl -s http://localhost:3000/api/health
-curl -s http://localhost:3000/api/subscription
-curl -s -X POST http://localhost:3000/api/faces -H "Content-Type: application/json" -d '{"frontPhotoUrl":"data:image/png;base64,FAKE","sidePhotoUrl":"data:image/png;base64,FAKE","gender":"unspecified","race":"unspecified"}'
-curl -s http://localhost:3000/api/faces/FACE_ID
-curl -s -X POST http://localhost:3000/api/faces/FACE_ID/mediapipe -H "Content-Type: application/json" -d '{"landmarks":[{"x":0.5,"y":0.5}]}' && curl -s http://localhost:3000/api/faces/FACE_ID/mediapipe
 ```
