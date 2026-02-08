@@ -625,6 +625,9 @@ export function useHomeFlow(): UseHomeFlowResult {
       }
 
       updateProcessing("analysis", "running");
+      const cohortEthnicity = race ? race.replace(/-/g, "_") : "white";
+      const cohortGender = gender || "male";
+      const cohortKey = `${cohortEthnicity}_${cohortGender}_young`;
       const create = await fetchJson<{ success: boolean; faceId: string }>("/api/faces", {
         method: "POST",
         body: JSON.stringify({
@@ -635,11 +638,12 @@ export function useHomeFlow(): UseHomeFlowResult {
           frontLandmarks,
           sideLandmarks,
           mediapipeLandmarks: frontLandmarks,
-          frontQuality,
-          sideQuality,
+          frontQuality: frontQuality ? ({ ...frontQuality, cohortKey } as unknown) : frontQuality,
+          sideQuality: sideQuality ? ({ ...sideQuality, cohortKey } as unknown) : sideQuality,
           manualLandmarks,
           gender,
           race,
+          cohortKey,
         }),
       });
       updateProcessing("analysis", "done");

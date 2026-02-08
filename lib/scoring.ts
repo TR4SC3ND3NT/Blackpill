@@ -7,6 +7,7 @@ import type {
   ReasonCode,
 } from "./types";
 import { normalizeLandmarks, type LandmarkInput } from "./landmarks";
+import { BASE_COHORT, DEFAULT_COHORT_KEY, FACEIQ_COHORTS, type CohortKey } from "./cohorts";
 
 type PillarName = "harmony" | "angularity" | "dimorphism" | "features";
 type MetricView = "front" | "side" | "either";
@@ -435,68 +436,7 @@ const computeSigma = (ideal: number, ratio: RatioDefinition) => {
   return Math.max(1e-6, Math.abs(ideal) * rel);
 };
 
-const DEFAULT_COHORT: FaceIQRatios = {
-  fWHR: 0.95,
-  verticalThirds: 1,
-  horizontalFifths: 0.42,
-  eyeMouthRatio: 0.95,
-  jawCheekRatio: 0.88,
-  symmetryError: 0.035,
-  phiFaceHeight: 1.62,
-  ipdToFaceWidth: 0.42,
-  intercanthalToIPD: 0.38,
-  mouthToNoseWidth: 1.55,
-  noseWidthToFaceWidth: 0.24,
-  mouthWidthToFaceWidth: 0.46,
-  browToEyeHeight: 0.19,
-  browToMouthHeight: 0.62,
-  noseToChinHeight: 0.63,
-  jawWidthToFaceWidth: 0.82,
-  chinWidthToJawWidth: 0.32,
-  cheekboneToTempleWidth: 0.92,
-  eyeWidthToFaceWidth: 0.76,
-  noseLengthToFaceHeight: 0.36,
-  gonialAngleL: 124,
-  gonialAngleR: 124,
-  gonialAngleAvg: 124,
-  bigonialWidth: 0.52,
-  ramusHeightL: 0.22,
-  ramusHeightR: 0.22,
-  jawlineSlopeL: 14,
-  jawlineSlopeR: 14,
-  chinProjection: 0.12,
-  facialConvexity: 165,
-  mandibularPlaneAngle: 26,
-  neckChinAngle: 118,
-  browRidgeAngle: 150,
-  jawNeckRatio: 0.72,
-  cheekboneProjection: 0.08,
-  lowerFaceRatio: 0.78,
-  jawFaceRatio: 0.82,
-  chinTaper: 0.32,
-  jawCheekStrength: 0.88,
-  faceLengthToWidth: 1.05,
-  browToJawHeightRatio: 0.62,
-  eyeSizeRatio: 0.22,
-  noseSizeRatio: 0.34,
-  mouthSizeRatio: 0.46,
-  cheekProminenceRatio: 1.08,
-  canthalTiltL: 6,
-  canthalTiltR: 6,
-  eyeAspectRatioL: 0.22,
-  eyeAspectRatioR: 0.22,
-  nasalIndex: 0.65,
-  philtrumLength: 0.12,
-  lipHeightRatio: 0.2,
-  cupidBowDepth: 0.08,
-  noseBridgeWidthRatio: 0.22,
-  eyeBrowDistanceL: 0.08,
-  eyeBrowDistanceR: 0.08,
-  upperLipProjection: 0.06,
-  lowerLipProjection: 0.05,
-  dorsumStraightness: 0.02,
-  earJawDistanceRatio: 0.38,
-};
+const DEFAULT_COHORT: FaceIQRatios = BASE_COHORT;
 
 const ratioDefinitions: RatioDefinition[] = [
   {
@@ -2265,7 +2205,11 @@ export const computeScores = ({
   const side = normalizeLandmarks(sideLandmarks);
 
   const ctx = buildContext(front, side, frontQuality, sideQuality, manualLandmarks ?? []);
-  const cohort = DEFAULT_COHORT;
+  const cohortKey =
+    ((frontQuality as unknown as { cohortKey?: CohortKey } | null | undefined)?.cohortKey ??
+      (sideQuality as unknown as { cohortKey?: CohortKey } | null | undefined)?.cohortKey ??
+      DEFAULT_COHORT_KEY) as CohortKey;
+  const cohort = FACEIQ_COHORTS[cohortKey] ?? DEFAULT_COHORT;
 
   const ratioResults = ratioDefinitions.map((ratio) => evaluateRatio(ratio, ctx, cohort));
 
