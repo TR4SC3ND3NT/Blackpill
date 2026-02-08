@@ -14,8 +14,6 @@ type Props = {
   previewStatus: string | null;
   previewError: string | null;
   error: string | null;
-  gender: string;
-  race: string;
   manualCalibration: ManualCalibrationResult | null;
   onBackToConsent: () => void;
   onRetryPreparation: () => void;
@@ -30,8 +28,6 @@ export default function CalibrationStep({
   previewStatus,
   previewError,
   error,
-  gender,
-  race,
   manualCalibration,
   onBackToConsent,
   onRetryPreparation,
@@ -65,7 +61,6 @@ export default function CalibrationStep({
           sideLandmarks={previewData.sideLandmarks}
           frontQuality={previewData.frontQuality}
           sideQuality={previewData.sideQuality}
-          profile={{ gender: gender || "male", ethnicity: race || "white" }}
           initialPoints={manualCalibration?.manualPoints ?? null}
           onBack={onBackToConsent}
           onComplete={onComplete}

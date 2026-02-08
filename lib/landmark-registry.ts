@@ -2,11 +2,6 @@ import type { Landmark, ManualLandmarkPoint, PhotoQuality } from "./types";
 
 export type LandmarkCalibrationView = "front" | "side";
 
-export type LandmarkProfile = {
-  gender: string;
-  ethnicity: string;
-};
-
 export type LandmarkCalibrationDef = {
   id: string;
   name: string;
@@ -17,8 +12,8 @@ export type LandmarkCalibrationDef = {
   required: boolean;
   forceManual?: boolean;
   hairSensitive?: boolean;
-  assetKey: string;
-  referenceFallbackKeys?: string[];
+  referenceAsset: string;
+  referenceFallbackAssets?: string[];
 };
 
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
@@ -206,8 +201,8 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     required: false,
     forceManual: true,
     hairSensitive: true,
-    assetKey: "trichion",
-    referenceFallbackKeys: ["forehead"],
+    referenceAsset: "trichion.webp",
+    referenceFallbackAssets: ["forehead.webp"],
   },
   {
     id: "forehead",
@@ -218,7 +213,7 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     mediapipeIndex: 10,
     required: false,
     hairSensitive: true,
-    assetKey: "forehead",
+    referenceAsset: "forehead.webp",
   },
   {
     id: "glabella",
@@ -228,7 +223,7 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Place between eyebrows at the brow root.",
     mediapipeIndex: 9,
     required: true,
-    assetKey: "glabella",
+    referenceAsset: "glabella.webp",
   },
   {
     id: "nasion",
@@ -238,7 +233,7 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Place where nasal bridge starts between the eyes.",
     mediapipeIndex: 6,
     required: true,
-    assetKey: "nasion",
+    referenceAsset: "nasion.webp",
   },
   {
     id: "left_eye_pupil",
@@ -248,7 +243,7 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Center on left pupil.",
     mediapipeIndex: 468,
     required: true,
-    assetKey: "leftEyePupil",
+    referenceAsset: "leftEyePupil.webp",
   },
   {
     id: "right_eye_pupil",
@@ -258,7 +253,7 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Center on right pupil.",
     mediapipeIndex: 473,
     required: true,
-    assetKey: "rightEyePupil",
+    referenceAsset: "rightEyePupil.webp",
   },
   {
     id: "left_eye_medial_canthus",
@@ -268,7 +263,7 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Place at inner left eye corner.",
     mediapipeIndex: 133,
     required: true,
-    assetKey: "leftEyeMedialCanthus",
+    referenceAsset: "leftEyeMedialCanthus.webp",
   },
   {
     id: "left_eye_lateral_canthus",
@@ -278,7 +273,7 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Place at outer left eye corner.",
     mediapipeIndex: 33,
     required: true,
-    assetKey: "leftEyeLateralCanthus",
+    referenceAsset: "leftEyeLateralCanthus.webp",
   },
   {
     id: "left_eye_upper_eyelid",
@@ -288,7 +283,7 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Highest point of left upper eyelid.",
     mediapipeIndex: 159,
     required: true,
-    assetKey: "leftEyeUpperEyelid",
+    referenceAsset: "leftEyeUpperEyelid.webp",
   },
   {
     id: "left_eye_lower_eyelid",
@@ -298,7 +293,7 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Lowest point of left lower eyelid.",
     mediapipeIndex: 145,
     required: true,
-    assetKey: "leftEyeLowerEyelid",
+    referenceAsset: "leftEyeLowerEyelid.webp",
   },
   {
     id: "left_eyelid_hood_end",
@@ -308,7 +303,7 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Place at lateral end of upper hood/crease region.",
     mediapipeIndex: 246,
     required: false,
-    assetKey: "leftEyelidHoodEnd",
+    referenceAsset: "leftEyelidHoodEnd.webp",
   },
   {
     id: "left_brow_head",
@@ -318,7 +313,7 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Inner start of left eyebrow.",
     mediapipeIndex: 70,
     required: false,
-    assetKey: "leftBrowHead",
+    referenceAsset: "leftBrowHead.webp",
   },
   {
     id: "left_brow_inner_corner",
@@ -328,7 +323,7 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Inner corner/anchor of left brow.",
     mediapipeIndex: 63,
     required: false,
-    assetKey: "leftBrowInnerCorner",
+    referenceAsset: "leftBrowInnerCorner.webp",
   },
   {
     id: "left_brow_arch",
@@ -338,7 +333,7 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Point on the left brow arch.",
     mediapipeIndex: 105,
     required: false,
-    assetKey: "leftBrowArch",
+    referenceAsset: "leftBrowArch.webp",
   },
   {
     id: "left_brow_peak",
@@ -348,7 +343,7 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Highest/most projected point of left brow arch.",
     mediapipeIndex: 66,
     required: false,
-    assetKey: "leftBrowPeak",
+    referenceAsset: "leftBrowPeak.webp",
   },
   {
     id: "left_brow_tail",
@@ -358,7 +353,7 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Lateral end of left brow.",
     mediapipeIndex: 107,
     required: false,
-    assetKey: "leftBrowTail",
+    referenceAsset: "leftBrowTail.webp",
   },
   {
     id: "left_upper_eyelid_crease",
@@ -368,7 +363,7 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Center point on left upper eyelid crease.",
     mediapipeIndex: 160,
     required: false,
-    assetKey: "leftUpperEyelidCrease",
+    referenceAsset: "leftUpperEyelidCrease.webp",
   },
   {
     id: "right_eye_medial_canthus",
@@ -378,7 +373,7 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Place at inner right eye corner.",
     mediapipeIndex: 362,
     required: true,
-    assetKey: "rightEyeMedialCanthus",
+    referenceAsset: "rightEyeMedialCanthus.webp",
   },
   {
     id: "right_eye_lateral_canthus",
@@ -388,7 +383,7 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Place at outer right eye corner.",
     mediapipeIndex: 263,
     required: true,
-    assetKey: "rightEyeLateralCanthus",
+    referenceAsset: "rightEyeLateralCanthus.webp",
   },
   {
     id: "right_eye_upper_eyelid",
@@ -398,7 +393,7 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Highest point of right upper eyelid.",
     mediapipeIndex: 386,
     required: true,
-    assetKey: "rightEyeUpperEyelid",
+    referenceAsset: "rightEyeUpperEyelid.webp",
   },
   {
     id: "right_eye_lower_eyelid",
@@ -408,7 +403,7 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Lowest point of right lower eyelid.",
     mediapipeIndex: 374,
     required: true,
-    assetKey: "rightEyeLowerEyelid",
+    referenceAsset: "rightEyeLowerEyelid.webp",
   },
   {
     id: "right_eyelid_hood_end",
@@ -418,7 +413,7 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Place at lateral end of upper hood/crease region.",
     mediapipeIndex: 466,
     required: false,
-    assetKey: "rightEyelidHoodEnd",
+    referenceAsset: "rightEyelidHoodEnd.webp",
   },
   {
     id: "right_brow_head",
@@ -428,7 +423,7 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Inner start of right eyebrow.",
     mediapipeIndex: 300,
     required: false,
-    assetKey: "rightBrowHead",
+    referenceAsset: "rightBrowHead.webp",
   },
   {
     id: "right_brow_inner_corner",
@@ -438,7 +433,7 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Inner corner/anchor of right brow.",
     mediapipeIndex: 293,
     required: false,
-    assetKey: "rightBrowInnerCorner",
+    referenceAsset: "rightBrowInnerCorner.webp",
   },
   {
     id: "right_brow_arch",
@@ -448,7 +443,7 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Point on the right brow arch.",
     mediapipeIndex: 334,
     required: false,
-    assetKey: "rightBrowArch",
+    referenceAsset: "rightBrowArch.webp",
   },
   {
     id: "right_brow_peak",
@@ -458,7 +453,7 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Highest/most projected point of right brow arch.",
     mediapipeIndex: 296,
     required: false,
-    assetKey: "rightBrowPeak",
+    referenceAsset: "rightBrowPeak.webp",
   },
   {
     id: "right_brow_tail",
@@ -468,7 +463,7 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Lateral end of right brow.",
     mediapipeIndex: 336,
     required: false,
-    assetKey: "rightBrowTail",
+    referenceAsset: "rightBrowTail.webp",
   },
   {
     id: "right_upper_eyelid_crease",
@@ -478,7 +473,7 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Center point on right upper eyelid crease.",
     mediapipeIndex: 387,
     required: false,
-    assetKey: "rightUpperEyelidCrease",
+    referenceAsset: "rightUpperEyelidCrease.webp",
   },
   {
     id: "nasal_base",
@@ -488,7 +483,7 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Base center of the nose where nostrils anchor.",
     mediapipeIndex: 2,
     required: true,
-    assetKey: "nasalBase",
+    referenceAsset: "nasalBase.webp",
   },
   {
     id: "nose_bottom",
@@ -498,7 +493,7 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Lowest contour point of nose tip/base.",
     mediapipeIndex: 2,
     required: false,
-    assetKey: "noseBottom",
+    referenceAsset: "noseBottom.webp",
   },
   {
     id: "left_nose_bridge",
@@ -508,7 +503,7 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Left lateral edge of nasal bridge.",
     mediapipeIndex: 98,
     required: true,
-    assetKey: "leftNoseBridge",
+    referenceAsset: "leftNoseBridge.webp",
   },
   {
     id: "right_nose_bridge",
@@ -518,7 +513,7 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Right lateral edge of nasal bridge.",
     mediapipeIndex: 327,
     required: true,
-    assetKey: "rightNoseBridge",
+    referenceAsset: "rightNoseBridge.webp",
   },
   {
     id: "mouth_left",
@@ -528,7 +523,7 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Left corner of mouth.",
     mediapipeIndex: 61,
     required: true,
-    assetKey: "mouthLeft",
+    referenceAsset: "mouthLeft.webp",
   },
   {
     id: "mouth_right",
@@ -538,7 +533,7 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Right corner of mouth.",
     mediapipeIndex: 291,
     required: true,
-    assetKey: "mouthRight",
+    referenceAsset: "mouthRight.webp",
   },
   {
     id: "mouth_middle",
@@ -548,7 +543,7 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Midpoint between mouth corners on lip line.",
     mediapipeIndex: 0,
     required: false,
-    assetKey: "mouthMiddle",
+    referenceAsset: "mouthMiddle.webp",
   },
   {
     id: "cupids_bow",
@@ -558,7 +553,7 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Top center point of upper lip cupid bow.",
     mediapipeIndex: 13,
     required: true,
-    assetKey: "cupidsBow",
+    referenceAsset: "cupidsBow.webp",
   },
   {
     id: "inner_cupids_bow",
@@ -568,7 +563,7 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Inner upper vermillion center.",
     mediapipeIndex: 13,
     required: false,
-    assetKey: "innerCupidsBow",
+    referenceAsset: "innerCupidsBow.webp",
   },
   {
     id: "labrale_superius",
@@ -578,8 +573,8 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Most anterior point on upper vermillion border.",
     mediapipeIndex: 13,
     required: false,
-    assetKey: "labraleSuperius",
-    referenceFallbackKeys: ["cupidsBow"],
+    referenceAsset: "labraleSuperius.webp",
+    referenceFallbackAssets: ["cupidsBow.webp"],
   },
   {
     id: "labrale_inferius",
@@ -589,8 +584,8 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Most anterior point on lower vermillion border.",
     mediapipeIndex: 14,
     required: true,
-    assetKey: "labraleInferius",
-    referenceFallbackKeys: ["lowerLip"],
+    referenceAsset: "labraleInferius.webp",
+    referenceFallbackAssets: ["lowerLip.webp"],
   },
   {
     id: "lower_lip",
@@ -600,7 +595,7 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Center of visible lower lip contour.",
     mediapipeIndex: 14,
     required: false,
-    assetKey: "lowerLip",
+    referenceAsset: "lowerLip.webp",
   },
   {
     id: "left_top_gonion",
@@ -610,7 +605,7 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Upper mandibular angle on left.",
     mediapipeIndex: 172,
     required: true,
-    assetKey: "leftTopGonion",
+    referenceAsset: "leftTopGonion.webp",
   },
   {
     id: "right_top_gonion",
@@ -620,7 +615,7 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Upper mandibular angle on right.",
     mediapipeIndex: 397,
     required: true,
-    assetKey: "rightTopGonion",
+    referenceAsset: "rightTopGonion.webp",
   },
   {
     id: "left_bottom_gonion",
@@ -630,7 +625,7 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Lower mandibular angle on left.",
     mediapipeIndex: 150,
     required: true,
-    assetKey: "leftBottomGonion",
+    referenceAsset: "leftBottomGonion.webp",
   },
   {
     id: "right_bottom_gonion",
@@ -640,7 +635,7 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Lower mandibular angle on right.",
     mediapipeIndex: 379,
     required: true,
-    assetKey: "rightBottomGonion",
+    referenceAsset: "rightBottomGonion.webp",
   },
   {
     id: "chin_left",
@@ -650,7 +645,7 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Left border of chin.",
     mediapipeIndex: 149,
     required: true,
-    assetKey: "chinLeft",
+    referenceAsset: "chinLeft.webp",
   },
   {
     id: "chin_right",
@@ -660,7 +655,7 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Right border of chin.",
     mediapipeIndex: 378,
     required: true,
-    assetKey: "chinRight",
+    referenceAsset: "chinRight.webp",
   },
   {
     id: "chin_bottom",
@@ -670,7 +665,7 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Lowest visible soft tissue point on chin.",
     mediapipeIndex: 152,
     required: false,
-    assetKey: "chinBottom",
+    referenceAsset: "chinBottom.webp",
   },
   {
     id: "menton",
@@ -680,8 +675,8 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Lowest median point of chin.",
     mediapipeIndex: 152,
     required: true,
-    assetKey: "menton",
-    referenceFallbackKeys: ["chinBottom"],
+    referenceAsset: "menton.webp",
+    referenceFallbackAssets: ["chinBottom.webp"],
   },
   {
     id: "left_cheek",
@@ -691,7 +686,7 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Most lateral left cheekbone contour.",
     mediapipeIndex: 234,
     required: true,
-    assetKey: "leftCheek",
+    referenceAsset: "leftCheek.webp",
   },
   {
     id: "right_cheek",
@@ -701,7 +696,7 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Most lateral right cheekbone contour.",
     mediapipeIndex: 454,
     required: true,
-    assetKey: "rightCheek",
+    referenceAsset: "rightCheek.webp",
   },
   {
     id: "left_temple",
@@ -711,7 +706,7 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Left temporal contour near upper lateral face.",
     mediapipeIndex: 54,
     required: false,
-    assetKey: "leftTemple",
+    referenceAsset: "leftTemple.webp",
   },
   {
     id: "right_temple",
@@ -721,7 +716,7 @@ const FRONT_REGISTRY_RAW: LandmarkCalibrationDef[] = [
     howToFind: "Right temporal contour near upper lateral face.",
     mediapipeIndex: 284,
     required: false,
-    assetKey: "rightTemple",
+    referenceAsset: "rightTemple.webp",
   },
 ];
 
@@ -797,7 +792,7 @@ const SIDE_REGISTRY: LandmarkCalibrationDef[] = [
     howToFind: "Highest point of cranial contour in profile.",
     mediapipeIndex: null,
     required: false,
-    assetKey: "vertex",
+    referenceAsset: "vertex.webp",
   },
   {
     id: "occiput",
@@ -807,7 +802,7 @@ const SIDE_REGISTRY: LandmarkCalibrationDef[] = [
     howToFind: "Most posterior occipital contour point.",
     mediapipeIndex: null,
     required: false,
-    assetKey: "occiput",
+    referenceAsset: "occiput.webp",
   },
   {
     id: "side_glabella",
@@ -817,7 +812,7 @@ const SIDE_REGISTRY: LandmarkCalibrationDef[] = [
     howToFind: "Brow prominence in profile.",
     mediapipeIndex: 168,
     required: true,
-    assetKey: "glabella",
+    referenceAsset: "glabella.webp",
   },
   {
     id: "side_forehead",
@@ -827,7 +822,7 @@ const SIDE_REGISTRY: LandmarkCalibrationDef[] = [
     howToFind: "Anterior forehead contour.",
     mediapipeIndex: 10,
     required: false,
-    assetKey: "forehead",
+    referenceAsset: "forehead.webp",
   },
   {
     id: "side_trichion",
@@ -839,7 +834,7 @@ const SIDE_REGISTRY: LandmarkCalibrationDef[] = [
     required: false,
     forceManual: true,
     hairSensitive: true,
-    assetKey: "trichion",
+    referenceAsset: "trichion.webp",
   },
   {
     id: "side_nasion",
@@ -849,7 +844,7 @@ const SIDE_REGISTRY: LandmarkCalibrationDef[] = [
     howToFind: "Root of nose between glabella and dorsum.",
     mediapipeIndex: 6,
     required: true,
-    assetKey: "nasion",
+    referenceAsset: "nasion.webp",
   },
   {
     id: "rhinion",
@@ -859,7 +854,7 @@ const SIDE_REGISTRY: LandmarkCalibrationDef[] = [
     howToFind: "Bony-cartilaginous transition on dorsum.",
     mediapipeIndex: 197,
     required: true,
-    assetKey: "rhinion",
+    referenceAsset: "rhinion.webp",
   },
   {
     id: "supratip",
@@ -869,7 +864,7 @@ const SIDE_REGISTRY: LandmarkCalibrationDef[] = [
     howToFind: "Point immediately above nasal tip.",
     mediapipeIndex: 195,
     required: true,
-    assetKey: "supratip",
+    referenceAsset: "supratip.webp",
   },
   {
     id: "infratip",
@@ -879,7 +874,7 @@ const SIDE_REGISTRY: LandmarkCalibrationDef[] = [
     howToFind: "Point immediately below nasal tip.",
     mediapipeIndex: 5,
     required: true,
-    assetKey: "infratip",
+    referenceAsset: "infratip.webp",
   },
   {
     id: "columella",
@@ -889,7 +884,7 @@ const SIDE_REGISTRY: LandmarkCalibrationDef[] = [
     howToFind: "Central columellar contour.",
     mediapipeIndex: 4,
     required: true,
-    assetKey: "columella",
+    referenceAsset: "columella.webp",
   },
   {
     id: "side_pronasale",
@@ -899,7 +894,7 @@ const SIDE_REGISTRY: LandmarkCalibrationDef[] = [
     howToFind: "Most projected nasal tip point.",
     mediapipeIndex: 1,
     required: true,
-    assetKey: "pronasale",
+    referenceAsset: "pronasale.webp",
   },
   {
     id: "side_subnasale",
@@ -909,7 +904,7 @@ const SIDE_REGISTRY: LandmarkCalibrationDef[] = [
     howToFind: "Junction of columella and upper lip.",
     mediapipeIndex: 2,
     required: true,
-    assetKey: "subnasale",
+    referenceAsset: "subnasale.webp",
   },
   {
     id: "subalare",
@@ -919,7 +914,7 @@ const SIDE_REGISTRY: LandmarkCalibrationDef[] = [
     howToFind: "Base of nostril ala.",
     mediapipeIndex: 98,
     required: false,
-    assetKey: "subalare",
+    referenceAsset: "subalare.webp",
   },
   {
     id: "labrale_superius_side",
@@ -929,7 +924,7 @@ const SIDE_REGISTRY: LandmarkCalibrationDef[] = [
     howToFind: "Most projected point of upper lip vermillion.",
     mediapipeIndex: 13,
     required: false,
-    assetKey: "labraleSuperius",
+    referenceAsset: "labraleSuperius.webp",
   },
   {
     id: "cheilion",
@@ -939,7 +934,7 @@ const SIDE_REGISTRY: LandmarkCalibrationDef[] = [
     howToFind: "Visible mouth corner in profile.",
     mediapipeIndex: 61,
     required: false,
-    assetKey: "cheilion",
+    referenceAsset: "cheilion.webp",
   },
   {
     id: "labrale_inferius_side",
@@ -949,7 +944,7 @@ const SIDE_REGISTRY: LandmarkCalibrationDef[] = [
     howToFind: "Most projected point of lower lip vermillion.",
     mediapipeIndex: 14,
     required: false,
-    assetKey: "labraleInferius",
+    referenceAsset: "labraleInferius.webp",
   },
   {
     id: "sublabiale",
@@ -959,7 +954,7 @@ const SIDE_REGISTRY: LandmarkCalibrationDef[] = [
     howToFind: "Deepest point between lower lip and chin.",
     mediapipeIndex: 17,
     required: false,
-    assetKey: "sublabiale",
+    referenceAsset: "sublabiale.webp",
   },
   {
     id: "pogonion",
@@ -969,7 +964,7 @@ const SIDE_REGISTRY: LandmarkCalibrationDef[] = [
     howToFind: "Most projected point of soft tissue chin.",
     mediapipeIndex: 152,
     required: true,
-    assetKey: "pogonion",
+    referenceAsset: "pogonion.webp",
   },
   {
     id: "menton_side",
@@ -979,7 +974,7 @@ const SIDE_REGISTRY: LandmarkCalibrationDef[] = [
     howToFind: "Lowest soft tissue point of chin profile.",
     mediapipeIndex: 152,
     required: true,
-    assetKey: "menton",
+    referenceAsset: "menton.webp",
   },
   {
     id: "cervical_point",
@@ -989,7 +984,7 @@ const SIDE_REGISTRY: LandmarkCalibrationDef[] = [
     howToFind: "Transition point from submental contour to neck.",
     mediapipeIndex: 377,
     required: true,
-    assetKey: "cervicalPoint",
+    referenceAsset: "cervicalPoint.webp",
   },
   {
     id: "gonion_top",
@@ -999,7 +994,7 @@ const SIDE_REGISTRY: LandmarkCalibrationDef[] = [
     howToFind: "Upper mandibular angle contour.",
     mediapipeIndex: 172,
     required: false,
-    assetKey: "gonionTop",
+    referenceAsset: "gonionTop.webp",
   },
   {
     id: "gonion_bottom",
@@ -1009,7 +1004,7 @@ const SIDE_REGISTRY: LandmarkCalibrationDef[] = [
     howToFind: "Lower mandibular angle contour.",
     mediapipeIndex: 150,
     required: false,
-    assetKey: "gonionBottom",
+    referenceAsset: "gonionBottom.webp",
   },
   {
     id: "porion",
@@ -1020,7 +1015,7 @@ const SIDE_REGISTRY: LandmarkCalibrationDef[] = [
     mediapipeIndex: 234,
     required: false,
     forceManual: true,
-    assetKey: "porion",
+    referenceAsset: "porion.webp",
   },
   {
     id: "orbitale",
@@ -1030,7 +1025,7 @@ const SIDE_REGISTRY: LandmarkCalibrationDef[] = [
     howToFind: "Lowest point on infraorbital rim.",
     mediapipeIndex: 33,
     required: false,
-    assetKey: "orbitale",
+    referenceAsset: "orbitale.webp",
   },
   {
     id: "tragus",
@@ -1041,7 +1036,7 @@ const SIDE_REGISTRY: LandmarkCalibrationDef[] = [
     mediapipeIndex: 132,
     required: false,
     forceManual: true,
-    assetKey: "tragus",
+    referenceAsset: "tragus.webp",
   },
   {
     id: "intertragic_notch",
@@ -1051,7 +1046,7 @@ const SIDE_REGISTRY: LandmarkCalibrationDef[] = [
     howToFind: "Notch between tragus and antitragus.",
     mediapipeIndex: null,
     required: false,
-    assetKey: "intertragicNotch",
+    referenceAsset: "intertragicNotch.webp",
   },
   {
     id: "corneal_apex",
@@ -1061,7 +1056,7 @@ const SIDE_REGISTRY: LandmarkCalibrationDef[] = [
     howToFind: "Most projected point of corneal surface.",
     mediapipeIndex: 468,
     required: false,
-    assetKey: "cornealApex",
+    referenceAsset: "cornealApex.webp",
   },
   {
     id: "cheekbone",
@@ -1071,7 +1066,7 @@ const SIDE_REGISTRY: LandmarkCalibrationDef[] = [
     howToFind: "Most projected zygomatic contour in profile.",
     mediapipeIndex: 234,
     required: false,
-    assetKey: "cheekbone",
+    referenceAsset: "cheekbone.webp",
   },
   {
     id: "eyelid_end",
@@ -1081,7 +1076,7 @@ const SIDE_REGISTRY: LandmarkCalibrationDef[] = [
     howToFind: "Lateral end of visible eyelid contour.",
     mediapipeIndex: 33,
     required: false,
-    assetKey: "eyelidEnd",
+    referenceAsset: "eyelidEnd.webp",
   },
   {
     id: "lower_eyelid_side",
@@ -1091,7 +1086,7 @@ const SIDE_REGISTRY: LandmarkCalibrationDef[] = [
     howToFind: "Lower eyelid contour in profile.",
     mediapipeIndex: 145,
     required: false,
-    assetKey: "lowerEyelid",
+    referenceAsset: "lowerEyelid.webp",
   },
   {
     id: "neck_point",
@@ -1101,7 +1096,7 @@ const SIDE_REGISTRY: LandmarkCalibrationDef[] = [
     howToFind: "Visible neck contour anchor point.",
     mediapipeIndex: null,
     required: false,
-    assetKey: "neckPoint",
+    referenceAsset: "neckPoint.webp",
   },
 ];
 
@@ -1116,32 +1111,15 @@ export const LANDMARK_REGISTRY_BY_ID = new Map(
   LANDMARK_CALIBRATION_REGISTRY.map((definition) => [definition.id, definition])
 );
 
-const normalizeProfileToken = (token: string, fallback: string) => {
-  const value = token.trim().toLowerCase();
-  if (!value) return fallback;
-  if (value === "middle-eastern") return "middleEastern";
-  if (value === "black") return "black";
-  if (value === "white") return "white";
-  if (value === "asian") return "asian";
-  if (value === "latino") return "latino";
-  return value.replace(/[^a-z0-9]/g, "") || fallback;
-};
+export const LANDMARK_REFERENCE_BASE_PATH = "/landmarks/reference";
 
-export const getReferenceSources = (
-  definition: LandmarkCalibrationDef,
-  profile: LandmarkProfile
-) => {
-  const gender = normalizeProfileToken(profile.gender, "male");
-  const ethnicity = normalizeProfileToken(profile.ethnicity, "white");
-  const keys = [definition.assetKey, ...(definition.referenceFallbackKeys ?? [])];
-  const sources: string[] = [];
-  for (const key of keys) {
-    sources.push(`/landmarks/${gender}/${ethnicity}/${definition.view}/${key}.webp`);
-    sources.push(`/landmarks/${gender}/${ethnicity}/${key}.webp`);
-    sources.push(`https://beta.faceiqlabs.com/images/landmarks/${gender}/${ethnicity}/${key}.webp?v=1`);
-  }
+export const getReferenceSources = (definition: LandmarkCalibrationDef) => {
+  const assets = [
+    definition.referenceAsset,
+    ...(definition.referenceFallbackAssets ?? []),
+  ];
   return {
-    sources: dedupe(sources),
+    sources: dedupe(assets.map((asset) => `${LANDMARK_REFERENCE_BASE_PATH}/${asset}`)),
   };
 };
 

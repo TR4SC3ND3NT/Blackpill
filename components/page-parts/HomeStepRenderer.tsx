@@ -167,8 +167,6 @@ export default function HomeStepRenderer({
             previewStatus={previewStatus}
             previewError={previewError}
             error={error}
-            gender={gender}
-            race={race}
             manualCalibration={manualCalibration}
             onBackToConsent={onBackFromCalibration}
             onRetryPreparation={onRetryPreview}

@@ -31,7 +31,6 @@ type Props = {
   sideLandmarks: Array<{ x: number; y: number; z?: number; visibility?: number }>;
   frontQuality: PhotoQuality;
   sideQuality: PhotoQuality;
-  profile: { gender: string; ethnicity: string };
   initialPoints?: ManualLandmarkPoint[] | null;
   onBack: () => void;
   onComplete: (result: CalibrationResult) => void;
@@ -93,7 +92,6 @@ export default function LandmarkCalibrator({
   sideLandmarks,
   frontQuality,
   sideQuality,
-  profile,
   initialPoints,
   onBack,
   onComplete,
@@ -117,6 +115,10 @@ export default function LandmarkCalibrator({
   const [sideCursor, setSideCursor] = useState(0);
   const [activeTab, setActiveTab] = useState<"photo" | "howto">("photo");
   const [error, setError] = useState<string | null>(null);
+  const [referenceError, setReferenceError] = useState<{
+    key: string;
+    missing: string;
+  } | null>(null);
   const [zoomLevel, setZoomLevel] = useState<1 | 2 | 4>(2);
   const [dragging, setDragging] = useState(false);
 
@@ -428,13 +430,11 @@ export default function LandmarkCalibrator({
 
   const referenceSources =
     activeDefinition && isStepPhase(phase)
-      ? getReferenceSources(activeDefinition, {
-          gender: profile.gender,
-          ethnicity: profile.ethnicity,
-        }).sources
+      ? getReferenceSources(activeDefinition).sources
       : [];
 
   const referenceSrc = referenceSources[0] ?? "";
+  const referenceKey = activePoint ? `${activePoint.id}:${referenceSrc}` : "";
 
   const summaryTitle =
     phase === "front_summary"
@@ -596,24 +596,40 @@ export default function LandmarkCalibrator({
             </div>
 
             {activeTab === "photo" ? (
-              <div className={styles.referencePreviewStatic}>
-                {referenceSrc ? (
-                  <img
-                    src={referenceSrc}
-                    alt={`Reference for ${activePoint.name}`}
-                    data-fallback-index="1"
-                    onError={(event) => {
-                      const target = event.currentTarget as HTMLImageElement;
-                      const nextIndex = Number(target.dataset.fallbackIndex || "1");
-                      if (nextIndex >= referenceSources.length) return;
-                      target.dataset.fallbackIndex = String(nextIndex + 1);
-                      target.src = referenceSources[nextIndex] ?? "";
-                    }}
-                  />
-                ) : (
-                  <div className={styles.muted}>No static reference found for this point.</div>
-                )}
-              </div>
+              <>
+                <div className={styles.referencePreviewStatic}>
+                  {referenceSrc ? (
+                    <img
+                      key={`${activePoint.id}:${referenceSrc}`}
+                      src={referenceSrc}
+                      alt={`Reference for ${activePoint.name}`}
+                      data-fallback-index="1"
+                      onError={(event) => {
+                        const target = event.currentTarget as HTMLImageElement;
+                        const nextIndex = Number(target.dataset.fallbackIndex || "1");
+                        if (nextIndex >= referenceSources.length) {
+                          const missing =
+                            referenceSources[referenceSources.length - 1] ?? target.src;
+                          if (process.env.NODE_ENV !== "production") {
+                            setReferenceError({ key: referenceKey, missing });
+                          }
+                          return;
+                        }
+                        target.dataset.fallbackIndex = String(nextIndex + 1);
+                        target.src = referenceSources[nextIndex] ?? "";
+                      }}
+                    />
+                  ) : (
+                    <div className={styles.muted}>No static reference found for this point.</div>
+                  )}
+                </div>
+                {referenceError?.key === referenceKey &&
+                process.env.NODE_ENV !== "production" ? (
+                  <div className={styles.error}>
+                    Missing reference asset: {referenceError.missing}
+                  </div>
+                ) : null}
+              </>
             ) : (
               <div className={styles.howToWrap}>
                 <p>{activeDefinition?.howToFind ?? "Use the most central visible anatomical point."}</p>
