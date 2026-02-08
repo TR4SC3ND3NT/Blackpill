@@ -13,6 +13,7 @@ import ProsConsPanel from "./_components/ProsConsPanel";
 import { useFace } from "./_components/FaceProvider";
 import { useSubscription } from "./_components/SubscriptionProvider";
 import { useResultsLock } from "./_components/useResultsLock";
+import { DEFAULT_COHORT_KEY, FACEIQ_COHORTS, type CohortKey } from "@/lib/cohorts";
 
 const formatScore = (score?: number) =>
   score == null ? "--" : (score / 10).toFixed(1);
@@ -132,6 +133,56 @@ export default function ResultsOverviewPage() {
     .sort((a, b) => b.score - a.score);
   const strengths = sorted.slice(0, 3);
   const weaknesses = sorted.slice(-3).reverse();
+
+  const cohortKey = useMemo(() => {
+    const fromQuality =
+      ((face.frontQuality as unknown as { cohortKey?: CohortKey } | null | undefined)?.cohortKey ??
+        (face.sideQuality as unknown as { cohortKey?: CohortKey } | null | undefined)?.cohortKey) as
+        | CohortKey
+        | undefined;
+    if (fromQuality) return fromQuality;
+
+    const ethnicity = face.race ? face.race.replace(/-/g, "_") : "white";
+    const genderKey = face.gender || "male";
+    const derived = `${ethnicity}_${genderKey}_young` as CohortKey;
+    return derived in FACEIQ_COHORTS ? derived : DEFAULT_COHORT_KEY;
+  }, [face.frontQuality, face.sideQuality, face.race, face.gender]);
+
+  const cohort = FACEIQ_COHORTS[cohortKey] ?? FACEIQ_COHORTS[DEFAULT_COHORT_KEY];
+
+  const cohortRows = useMemo(() => {
+    const metrics = face.metricDiagnostics ?? [];
+
+    const pick = (id: string) => metrics.find((metric) => metric.id === id)?.value ?? null;
+    const asNum = (value: number | null) => (value == null || !Number.isFinite(value) ? null : value);
+    const formatSigned = (value: number, digits = 2) =>
+      `${value >= 0 ? "+" : ""}${value.toFixed(digits)}`;
+
+    const fWHR = asNum(pick("fWHR"));
+    const gonial = asNum(pick("gonialAngleAvg"));
+
+    const fWHRIdeal = (cohort as unknown as Record<string, number>).fWHR ?? null;
+    const gonialIdeal = (cohort as unknown as Record<string, number>).gonialAngleAvg ?? null;
+
+    return [
+      {
+        key: "fWHR",
+        label: "fWHR",
+        value: fWHR,
+        ideal: fWHRIdeal,
+        format: (value: number) => value.toFixed(2),
+        formatDiff: (delta: number) => formatSigned(delta, 2),
+      },
+      {
+        key: "gonialAngleAvg",
+        label: "Gonial angle",
+        value: gonial,
+        ideal: gonialIdeal,
+        format: (value: number) => `${Math.round(value)}°`,
+        formatDiff: (delta: number) => `${delta >= 0 ? "+" : ""}${Math.round(delta)}°`,
+      },
+    ];
+  }, [face.metricDiagnostics, cohort]);
 
   return (
     <>
@@ -392,6 +443,39 @@ export default function ResultsOverviewPage() {
               overall={face.overallScore}
               size={320}
             />
+            <div className={styles.cohortInfo}>
+              <div className={styles.cohortTitle}>
+                Compared to: <strong>{cohortKey}</strong> cohort
+              </div>
+              <div className={styles.cohortSubtitle}>Displayed as value vs cohort norm (delta).</div>
+              <div className={styles.cohortRows}>
+                {cohortRows.map((row) => {
+                  const ready =
+                    row.value != null &&
+                    Number.isFinite(row.value) &&
+                    row.ideal != null &&
+                    Number.isFinite(row.ideal);
+                  const diff = ready ? (row.value as number) - (row.ideal as number) : null;
+                  return (
+                    <div key={row.key} className={styles.cohortRow}>
+                      <div className={styles.cohortMetric}>{row.label}</div>
+                      <div className={styles.cohortValues}>
+                        {ready ? (
+                          <>
+                            <span>{row.format(row.value as number)}</span>
+                            <span className={styles.cohortVs}>vs</span>
+                            <span>{row.format(row.ideal as number)}</span>
+                            <span className={styles.cohortDelta}>({row.formatDiff(diff as number)})</span>
+                          </>
+                        ) : (
+                          <span className={styles.cohortMissing}>--</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         </motion.div>
       </div>
