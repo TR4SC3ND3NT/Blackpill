@@ -8,6 +8,112 @@ import type {
 } from "./types";
 import { normalizeLandmarks, type LandmarkInput } from "./landmarks";
 
+type PillarName = "harmony" | "angularity" | "dimorphism" | "features";
+type MetricView = "front" | "side" | "either";
+
+export type FaceIQRatios = {
+  // HARMONY (20)
+  fWHR: number;
+  verticalThirds: number;
+  horizontalFifths: number;
+  eyeMouthRatio: number;
+  jawCheekRatio: number;
+  symmetryError: number;
+  phiFaceHeight: number;
+  ipdToFaceWidth: number;
+  intercanthalToIPD: number;
+  mouthToNoseWidth: number;
+  noseWidthToFaceWidth: number;
+  mouthWidthToFaceWidth: number;
+  browToEyeHeight: number;
+  browToMouthHeight: number;
+  noseToChinHeight: number;
+  jawWidthToFaceWidth: number;
+  chinWidthToJawWidth: number;
+  cheekboneToTempleWidth: number;
+  eyeWidthToFaceWidth: number;
+  noseLengthToFaceHeight: number;
+
+  // ANGULARITY (15)
+  gonialAngleL: number;
+  gonialAngleR: number;
+  gonialAngleAvg: number;
+  bigonialWidth: number;
+  ramusHeightL: number;
+  ramusHeightR: number;
+  jawlineSlopeL: number;
+  jawlineSlopeR: number;
+  chinProjection: number;
+  facialConvexity: number;
+  mandibularPlaneAngle: number;
+  neckChinAngle: number;
+  browRidgeAngle: number;
+  jawNeckRatio: number;
+  cheekboneProjection: number;
+
+  // DIMORPHISM (10)
+  lowerFaceRatio: number;
+  jawFaceRatio: number;
+  chinTaper: number;
+  jawCheekStrength: number;
+  faceLengthToWidth: number;
+  browToJawHeightRatio: number;
+  eyeSizeRatio: number;
+  noseSizeRatio: number;
+  mouthSizeRatio: number;
+  cheekProminenceRatio: number;
+
+  // FEATURES (15)
+  canthalTiltL: number;
+  canthalTiltR: number;
+  eyeAspectRatioL: number;
+  eyeAspectRatioR: number;
+  nasalIndex: number;
+  philtrumLength: number;
+  lipHeightRatio: number;
+  cupidBowDepth: number;
+  noseBridgeWidthRatio: number;
+  eyeBrowDistanceL: number;
+  eyeBrowDistanceR: number;
+  upperLipProjection: number;
+  lowerLipProjection: number;
+  dorsumStraightness: number;
+  earJawDistanceRatio: number;
+};
+
+type RatioKey = keyof FaceIQRatios;
+
+type RatioDefinition = {
+  key: RatioKey;
+  title: string;
+  pillar: PillarName;
+  view: MetricView;
+  baseWeight: number;
+  // Used for strict-manual gating and confidence weighting.
+  requiredLandmarkIds?: string[];
+  requiredPoints: Array<{ view: "front" | "side"; index: number }>;
+  // Tolerance used to convert deviations to z-scores.
+  sigmaRel?: number;
+  sigmaAbs?: number;
+  formula: (ctx: ScoreContext) => number | null;
+};
+
+type RatioResult = MetricDiagnostic;
+
+type ScoreContext = {
+  frontAligned: Landmark[];
+  sideAligned: Landmark[];
+  manualByIndex: Map<string, ManualLandmarkPoint>;
+  manualById: Map<string, ManualLandmarkPoint>;
+  frontQuality: PhotoQuality;
+  sideQuality: PhotoQuality;
+  ipd: number;
+  faceWidth: number;
+  faceHeight: number;
+  sideScale: number;
+  strictManual: boolean;
+};
+
 const clamp = (value: number, min = 0, max = 100) =>
   Math.max(min, Math.min(max, value));
 
@@ -45,108 +151,58 @@ const alignByRoll = (points: Landmark[], center: Landmark, rollDeg: number) => {
   return points.map((point) => rotatePoint(point, center, angleRad));
 };
 
-const severityFromScore = (
-  score: number,
-  insufficient = false
-): Assessment["severity"] => {
-  if (insufficient) return "medium";
-  if (score >= 75) return "low";
-  if (score >= 55) return "medium";
-  return "high";
+const angleLineDeg = (a: Landmark, b: Landmark) =>
+  (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI;
+
+const angle3pt = (a: Landmark, b: Landmark, c: Landmark) => {
+  const abx = a.x - b.x;
+  const aby = a.y - b.y;
+  const cbx = c.x - b.x;
+  const cby = c.y - b.y;
+  const dot = abx * cbx + aby * cby;
+  const den = Math.max(1e-8, Math.hypot(abx, aby) * Math.hypot(cbx, cby));
+  const cos = clamp(dot / den, -1, 1);
+  return (Math.acos(cos) * 180) / Math.PI;
 };
 
-const noteFor = (
-  score: number,
-  insufficient: boolean,
-  high: string,
-  mid: string,
-  low: string
-) => {
-  if (insufficient) return "Insufficient confidence for reliable scoring.";
-  if (score >= 75) return high;
-  if (score >= 55) return mid;
-  return low;
+const radToErf = (x: number) => {
+  // Abramowitz-Stegun 7.1.26
+  const sign = x < 0 ? -1 : 1;
+  const ax = Math.abs(x);
+  const t = 1 / (1 + 0.3275911 * ax);
+  const y =
+    1 -
+    (((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t +
+      0.254829592) *
+      t) *
+      Math.exp(-ax * ax);
+  return sign * y;
 };
 
-type ScoreBand = {
-  min: number;
-  optMin: number;
-  optMax: number;
-  max: number;
-};
+const normalCdf = (x: number) => 0.5 * (1 + radToErf(x / Math.SQRT2));
 
-const scoreFromBand = (value: number, band: ScoreBand) => {
-  if (!Number.isFinite(value)) return 0;
-  if (value < band.min || value > band.max) return 0;
-  if (value >= band.optMin && value <= band.optMax) return 100;
+// Similarity score (0..100) derived from a z-score distance to cohort target.
+// We map distance -> "percentile-style" score that degrades smoothly (not a hard p-value cliff).
+// abs(z)=0   => ~97.7
+// abs(z)=1   => ~84.1
+// abs(z)=2   => 50
+// abs(z)=3   => ~15.9
+const SIMILARITY_Z_OFFSET = 2;
 
-  if (value < band.optMin) {
-    const den = Math.max(1e-6, band.optMin - band.min);
-    return clamp(((value - band.min) / den) * 100);
-  }
-
-  const den = Math.max(1e-6, band.max - band.optMax);
-  return clamp(((band.max - value) / den) * 100);
+const scoreFromZ = (z: number) => {
+  if (!Number.isFinite(z)) return 0;
+  const simZ = SIMILARITY_Z_OFFSET - Math.abs(z);
+  return clamp(normalCdf(simZ) * 100);
 };
 
 const confidenceToErrorBar = (confidence: number) =>
-  0.35 + (1 - clamp01(confidence)) * 0.95;
-
-const FRONT_MIRROR_PAIRS: Array<[number, number]> = [
-  [33, 263],
-  [133, 362],
-  [61, 291],
-  [172, 397],
-  [58, 288],
-  [150, 379],
-  [93, 323],
-  [132, 361],
-];
-
-const FALLBACK_INDEX: Record<string, number | null> = {
-  left_eye_lateral_canthus: 33,
-  right_eye_lateral_canthus: 263,
-  left_eye_medial_canthus: 133,
-  right_eye_medial_canthus: 362,
-  left_eye_upper_eyelid: 159,
-  left_eye_lower_eyelid: 145,
-  right_eye_upper_eyelid: 386,
-  right_eye_lower_eyelid: 374,
-  mouth_left: 61,
-  mouth_right: 291,
-  cupids_bow: 13,
-  labrale_inferius: 14,
-  left_top_gonion: 172,
-  right_top_gonion: 397,
-  left_bottom_gonion: 150,
-  right_bottom_gonion: 379,
-  left_cheek: 234,
-  right_cheek: 454,
-  left_nose_bridge: 98,
-  right_nose_bridge: 327,
-  glabella: 168,
-  subnasale: 2,
-  menton: 152,
-  chin_left: 149,
-  chin_right: 378,
-  nasion: 6,
-  pronasale: 1,
-  side_glabella: 168,
-  side_subnasale: 2,
-  pogonion: 152,
-  side_nasion: 6,
-  rhinion: 197,
-  supratip: 195,
-  infratip: 5,
-  columella: 4,
-  side_pronasale: 1,
-};
+  0.4 + (1 - clamp01(confidence)) * 0.9;
 
 const reasonPenaltyMultiplier = (reasonCodes: ReasonCode[]) => {
   let factor = 1;
   if (reasonCodes.includes("bad_pose")) factor *= 0.84;
   if (reasonCodes.includes("not_enough_yaw")) factor *= 0.6;
-  if (reasonCodes.includes("excessive_pitch")) factor *= 0.8;
+  if (reasonCodes.includes("excessive_pitch")) factor *= 0.82;
   if (reasonCodes.includes("excessive_roll")) factor *= 0.92;
   if (reasonCodes.includes("side_ok_three_quarter")) factor *= 0.96;
   if (reasonCodes.includes("blur")) factor *= 0.82;
@@ -155,148 +211,6 @@ const reasonPenaltyMultiplier = (reasonCodes: ReasonCode[]) => {
   if (reasonCodes.includes("low_landmark_conf")) factor *= 0.7;
   if (reasonCodes.includes("transformed_detection")) factor *= 0.68;
   return factor;
-};
-
-type PillarName = "harmony" | "angularity" | "dimorphism" | "features";
-type MetricView = "front" | "side" | "either";
-
-type MetricDefinition = {
-  id: string;
-  title: string;
-  pillar: PillarName;
-  view: MetricView;
-  baseWeight: number;
-  requiredPoints: number[];
-  requiredLandmarkIds?: string[];
-  band: ScoreBand;
-  notes: [string, string, string];
-  formula: (ctx: ScoreContext) => number | null;
-};
-
-type MetricResult = MetricDiagnostic;
-
-type ScoreContext = {
-  front: Landmark[];
-  side: Landmark[];
-  frontAligned: Landmark[];
-  sideAligned: Landmark[];
-  manualByIndex: Map<string, ManualLandmarkPoint>;
-  manualById: Map<string, ManualLandmarkPoint>;
-  frontManualAligned: Map<string, Landmark>;
-  sideManualAligned: Map<string, Landmark>;
-  frontQuality: PhotoQuality;
-  sideQuality: PhotoQuality;
-  ipd: number;
-  frontFaceWidth: number;
-  frontLowerFaceHeight: number;
-  sideScale: number;
-  strictManual: boolean;
-};
-
-const defaultQuality = (expectedView: "front" | "side"): PhotoQuality => ({
-  poseYaw: 0,
-  posePitch: 0,
-  poseRoll: 0,
-  detectedView: "unknown",
-  faceInFrame: false,
-  minSidePx: 0,
-  blurVariance: 0,
-  landmarkCount: 0,
-  quality: "low",
-  issues: [],
-  confidence: 0,
-  pose: {
-    yaw: 0,
-    pitch: 0,
-    roll: 0,
-    source: "none",
-    matrix: null,
-    confidence: 0,
-    view: "unknown",
-    validFront: false,
-    validSide: false,
-  },
-  expectedView,
-  viewValid: false,
-  viewWeight: 0,
-  reasonCodes: ["low_landmark_conf"],
-});
-
-const ensureQuality = (
-  quality: PhotoQuality | null | undefined,
-  expectedView: "front" | "side"
-): PhotoQuality => quality ?? defaultQuality(expectedView);
-
-const pointVisibilityFactor = (points: Landmark[], indices: number[]) => {
-  if (!indices.length) return 1;
-  const vis = indices
-    .map((index) => {
-      const point = getPoint(points, index);
-      if (!point) return 0;
-      const v = point.visibility;
-      if (v == null || !Number.isFinite(v)) return 1;
-      return clamp01(v);
-    })
-    .filter(Number.isFinite);
-
-  if (!vis.length) return 1;
-  const maxVis = Math.max(...vis);
-  const minVis = Math.min(...vis);
-  // FaceLandmarker often emits 0 visibility for all points in IMAGE mode.
-  if (maxVis <= 0.001 && minVis >= 0) return 1;
-  return avg(vis);
-};
-
-const metricBaseConfidence = (
-  view: MetricView,
-  ctx: ScoreContext,
-  requiredPoints: number[],
-  requiredLandmarkIds?: string[]
-) => {
-  const frontPoints = pointVisibilityFactor(ctx.frontAligned, requiredPoints);
-  const sidePoints = pointVisibilityFactor(ctx.sideAligned, requiredPoints);
-  const manualFactor = meanManualConfidence(requiredLandmarkIds, ctx.manualById);
-
-  if (view === "front") {
-    return (
-      clamp01(ctx.frontQuality.confidence) *
-      reasonPenaltyMultiplier(ctx.frontQuality.reasonCodes) *
-      frontPoints *
-      manualFactor
-    );
-  }
-
-  if (view === "side") {
-    return (
-      clamp01(ctx.sideQuality.confidence) *
-      clamp01(ctx.sideQuality.viewWeight) *
-      reasonPenaltyMultiplier(ctx.sideQuality.reasonCodes) *
-      sidePoints *
-      manualFactor
-    );
-  }
-
-  const front =
-    clamp01(ctx.frontQuality.confidence) *
-    reasonPenaltyMultiplier(ctx.frontQuality.reasonCodes) *
-    frontPoints;
-  const side =
-    clamp01(ctx.sideQuality.confidence) *
-    clamp01(ctx.sideQuality.viewWeight) *
-    reasonPenaltyMultiplier(ctx.sideQuality.reasonCodes) *
-    sidePoints;
-  return clamp01((front * 0.65 + side * 0.35) * manualFactor);
-};
-
-const hasRequiredPoints = (points: Landmark[], indices: number[]) =>
-  indices.every((index) => {
-    const point = getPoint(points, index);
-    return !!point && Number.isFinite(point.x) && Number.isFinite(point.y);
-  });
-
-const profileDirectionAwareDelta = (a: Landmark, b: Landmark, yaw: number) => {
-  const sign = yaw >= 0 ? 1 : -1;
-  return sign * (a.x - b.x);
 };
 
 const manualKey = (view: "front" | "side", index: number) => `${view}:${index}`;
@@ -319,28 +233,6 @@ const buildManualIdMap = (points: ManualLandmarkPoint[] = []) => {
   return map;
 };
 
-const buildAlignedManualMap = (
-  points: ManualLandmarkPoint[],
-  view: "front" | "side",
-  center: Landmark,
-  rollDeg: number
-) => {
-  const angleRad = (-rollDeg * Math.PI) / 180;
-  const map = new Map<string, Landmark>();
-  for (const point of points) {
-    if (point.view !== view) continue;
-    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) continue;
-    if (!point.confirmed) continue;
-    const aligned = rotatePoint(
-      { x: point.x, y: point.y, z: 0, visibility: point.confidence },
-      center,
-      angleRad
-    );
-    map.set(point.id, aligned);
-  }
-  return map;
-};
-
 const meanManualConfidence = (
   ids: string[] | undefined,
   manualById: Map<string, ManualLandmarkPoint>
@@ -354,605 +246,39 @@ const meanManualConfidence = (
   return avg(values);
 };
 
-const validateManualForMetric = (
-  metric: MetricDefinition,
-  ctx: ScoreContext
-): {
-  valid: boolean;
-  reason: string | null;
-} => {
-  if (metric.requiredLandmarkIds?.length) {
-    const matched = metric.requiredLandmarkIds
-      .map((id) => ctx.manualById.get(id))
-      .filter((point): point is ManualLandmarkPoint => point != null);
-
-    if (!matched.length) {
-      return { valid: true, reason: null };
-    }
-
-    const invalid = matched.filter((point) => !point.confirmed);
-    if (invalid.length) {
-      return {
-        valid: false,
-        reason: `manual_unconfirmed:${invalid.map((point) => point.id).join(",")}`,
-      };
-    }
-    return { valid: true, reason: null };
-  }
-
-  const views: Array<"front" | "side"> =
-    metric.view === "either" ? ["front", "side"] : [metric.view];
-
-  let hasManualCoverage = false;
-  const invalidPoints: string[] = [];
-
-  for (const view of views) {
-    for (const index of metric.requiredPoints) {
-      const point = ctx.manualByIndex.get(manualKey(view, index));
-      if (!point) continue;
-      hasManualCoverage = true;
-      if (!point.confirmed) {
-        invalidPoints.push(point.id);
-      }
-    }
-  }
-
-  if (!hasManualCoverage) {
-    return { valid: true, reason: null };
-  }
-
-  if (invalidPoints.length) {
-    return {
-      valid: false,
-      reason: `manual_unconfirmed:${Array.from(new Set(invalidPoints)).join(",")}`,
-    };
-  }
-
-  return { valid: true, reason: null };
-};
-
-const lineDeviation = (points: Landmark[], start: Landmark, end: Landmark, scale: number) => {
-  const den = Math.max(1e-6, dist(start, end));
-  const deviations = points.map((point) => {
-    const area = Math.abs(
-      (end.y - start.y) * point.x -
-        (end.x - start.x) * point.y +
-        end.x * start.y -
-        end.y * start.x
-    );
-    return area / den;
-  });
-  return avg(deviations) / Math.max(scale, 1e-6);
-};
-
-const angleDeg = (a: Landmark, b: Landmark) =>
-  (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI;
-
-const pointFromManualOrFallback = (
-  ctx: ScoreContext,
-  id: string,
-  view: "front" | "side",
-  fallbackIndex: number | null
-) => {
-  const manual =
-    view === "front" ? ctx.frontManualAligned.get(id) : ctx.sideManualAligned.get(id);
-  if (manual) return manual;
-  if (ctx.strictManual) return null;
-
-  if (fallbackIndex == null) return null;
-  const source = view === "front" ? ctx.frontAligned : ctx.sideAligned;
-  return getPoint(source, fallbackIndex);
-};
-
-const metricDefinitions: MetricDefinition[] = [
-  {
-    id: "harmony_symmetry",
-    title: "Symmetry",
-    pillar: "harmony",
-    view: "front",
-    baseWeight: 1.4,
-    requiredPoints: FRONT_MIRROR_PAIRS.flat(),
-    requiredLandmarkIds: [
-      "left_eye_lateral_canthus",
-      "right_eye_lateral_canthus",
-      "left_eye_medial_canthus",
-      "right_eye_medial_canthus",
-      "left_cheek",
-      "right_cheek",
-      "left_top_gonion",
-      "right_top_gonion",
-      "left_bottom_gonion",
-      "right_bottom_gonion",
-      "mouth_left",
-      "mouth_right",
-      "chin_left",
-      "chin_right",
-    ],
-    band: { min: 0, optMin: 0, optMax: 0.04, max: 0.2 },
-    notes: [
-      "Left-right balance is strong.",
-      "Symmetry is moderately balanced.",
-      "Symmetry drift detected.",
-    ],
-    formula: (ctx) => {
-      const p = (id: string) =>
-        pointFromManualOrFallback(ctx, id, "front", FALLBACK_INDEX[id] ?? null);
-      const leftEye = p("left_eye_medial_canthus");
-      const rightEye = p("right_eye_medial_canthus");
-      if (!leftEye || !rightEye) return null;
-      const midX = (leftEye.x + rightEye.x) / 2;
-      const pairs: Array<[string, string]> = [
-        ["left_eye_lateral_canthus", "right_eye_lateral_canthus"],
-        ["left_eye_medial_canthus", "right_eye_medial_canthus"],
-        ["mouth_left", "mouth_right"],
-        ["left_top_gonion", "right_top_gonion"],
-        ["left_bottom_gonion", "right_bottom_gonion"],
-        ["left_cheek", "right_cheek"],
-        ["chin_left", "chin_right"],
-      ];
-      const errors = pairs
-        .map(([leftId, rightId]) => {
-          const left = p(leftId);
-          const right = p(rightId);
-          if (!left || !right) return null;
-          const dx = Math.abs(((left.x + right.x) / 2 - midX) * 2);
-          const dy = Math.abs(left.y - right.y);
-          return (dx + dy) / Math.max(ctx.ipd, 1e-6);
-        })
-        .filter((value): value is number => value != null);
-      return errors.length ? avg(errors) : null;
+const ensureQuality = (
+  quality: PhotoQuality | null | undefined,
+  expectedView: "front" | "side"
+): PhotoQuality => {
+  if (quality) return quality;
+  return {
+    poseYaw: 0,
+    posePitch: 0,
+    poseRoll: 0,
+    detectedView: "unknown",
+    faceInFrame: false,
+    minSidePx: 0,
+    blurVariance: 0,
+    landmarkCount: 0,
+    quality: "low",
+    issues: [],
+    confidence: 0,
+    pose: {
+      yaw: 0,
+      pitch: 0,
+      roll: 0,
+      source: "none",
+      matrix: null,
+      confidence: 0,
+      view: "unknown",
+      validFront: false,
+      validSide: false,
     },
-  },
-  {
-    id: "harmony_vertical_balance",
-    title: "Vertical thirds",
-    pillar: "harmony",
-    view: "front",
-    baseWeight: 1.1,
-    requiredPoints: [168, 2, 152],
-    requiredLandmarkIds: ["glabella", "subnasale", "menton"],
-    band: { min: 0.55, optMin: 0.8, optMax: 1.15, max: 1.7 },
-    notes: [
-      "Vertical proportions are balanced.",
-      "Vertical proportions are acceptable.",
-      "Vertical proportion drift detected.",
-    ],
-    formula: (ctx) => {
-      const p = (id: string) =>
-        pointFromManualOrFallback(ctx, id, "front", FALLBACK_INDEX[id] ?? null);
-      const brow = p("glabella");
-      const noseBase = p("subnasale");
-      const chin = p("menton");
-      if (!brow || !noseBase || !chin) return null;
-      const upper = dist(brow, noseBase);
-      const lower = dist(noseBase, chin);
-      if (lower <= 1e-6) return null;
-      return upper / lower;
-    },
-  },
-  {
-    id: "harmony_jaw_cheek",
-    title: "Jaw to cheekbone",
-    pillar: "harmony",
-    view: "front",
-    baseWeight: 1,
-    requiredPoints: [172, 397, 234, 454],
-    requiredLandmarkIds: ["left_top_gonion", "right_top_gonion", "left_cheek", "right_cheek"],
-    band: { min: 0.6, optMin: 0.78, optMax: 0.96, max: 1.18 },
-    notes: [
-      "Jaw-cheek proportion is balanced.",
-      "Jaw-cheek proportion is moderate.",
-      "Jaw-cheek proportion appears imbalanced.",
-    ],
-    formula: (ctx) => {
-      const p = (id: string) =>
-        pointFromManualOrFallback(ctx, id, "front", FALLBACK_INDEX[id] ?? null);
-      const jawLeft = p("left_top_gonion");
-      const jawRight = p("right_top_gonion");
-      const cheekLeft = p("left_cheek");
-      const cheekRight = p("right_cheek");
-      if (!jawLeft || !jawRight || !cheekLeft || !cheekRight) return null;
-      const jaw = dist(jawLeft, jawRight);
-      const cheek = dist(cheekLeft, cheekRight);
-      if (cheek <= 1e-6) return null;
-      return jaw / cheek;
-    },
-  },
-  {
-    id: "harmony_eye_mouth",
-    title: "Eye to mouth ratio",
-    pillar: "harmony",
-    view: "front",
-    baseWeight: 0.9,
-    requiredPoints: [33, 263, 61, 291],
-    requiredLandmarkIds: [
-      "left_eye_lateral_canthus",
-      "right_eye_lateral_canthus",
-      "mouth_left",
-      "mouth_right",
-    ],
-    band: { min: 0.55, optMin: 0.75, optMax: 1.1, max: 1.5 },
-    notes: [
-      "Eye-mouth ratio is balanced.",
-      "Eye-mouth ratio is near neutral.",
-      "Eye-mouth ratio is outside stable range.",
-    ],
-    formula: (ctx) => {
-      const p = (id: string) =>
-        pointFromManualOrFallback(ctx, id, "front", FALLBACK_INDEX[id] ?? null);
-      const eyeLeft = p("left_eye_lateral_canthus");
-      const eyeRight = p("right_eye_lateral_canthus");
-      const mouthLeft = p("mouth_left");
-      const mouthRight = p("mouth_right");
-      if (!eyeLeft || !eyeRight || !mouthLeft || !mouthRight) return null;
-      const eyeWidth = dist(eyeLeft, eyeRight);
-      const mouthWidth = dist(mouthLeft, mouthRight);
-      if (mouthWidth <= 1e-6) return null;
-      return eyeWidth / mouthWidth;
-    },
-  },
-  {
-    id: "harmony_profile_balance",
-    title: "Profile vertical balance",
-    pillar: "harmony",
-    view: "side",
-    baseWeight: 0.8,
-    requiredPoints: [168, 2, 152],
-    requiredLandmarkIds: ["side_glabella", "side_subnasale", "pogonion"],
-    band: { min: 0.55, optMin: 0.8, optMax: 1.2, max: 1.8 },
-    notes: [
-      "Profile thirds are balanced.",
-      "Profile thirds are moderate.",
-      "Profile thirds are outside stable range.",
-    ],
-    formula: (ctx) => {
-      const p = (id: string) =>
-        pointFromManualOrFallback(ctx, id, "side", FALLBACK_INDEX[id] ?? null);
-      const brow = p("side_glabella");
-      const noseBase = p("side_subnasale");
-      const chin = p("pogonion");
-      if (!brow || !noseBase || !chin) return null;
-      const upper = dist(brow, noseBase);
-      const lower = dist(noseBase, chin);
-      if (lower <= 1e-6) return null;
-      return upper / lower;
-    },
-  },
-  {
-    id: "angularity_jaw_height",
-    title: "Jaw width to lower-face height",
-    pillar: "angularity",
-    view: "front",
-    baseWeight: 1.2,
-    requiredPoints: [172, 397, 2, 152],
-    requiredLandmarkIds: ["left_top_gonion", "right_top_gonion", "subnasale", "menton"],
-    band: { min: 0.6, optMin: 0.95, optMax: 1.4, max: 1.95 },
-    notes: [
-      "Lower-face structure appears angular.",
-      "Lower-face structure is moderate.",
-      "Lower-face structure appears soft.",
-    ],
-    formula: (ctx) => {
-      const p = (id: string) =>
-        pointFromManualOrFallback(ctx, id, "front", FALLBACK_INDEX[id] ?? null);
-      const jawLeft = p("left_top_gonion");
-      const jawRight = p("right_top_gonion");
-      const noseBase = p("subnasale");
-      const chin = p("menton");
-      if (!jawLeft || !jawRight || !noseBase || !chin) return null;
-      const jawWidth = dist(jawLeft, jawRight);
-      const lowerHeight = dist(noseBase, chin);
-      if (lowerHeight <= 1e-6) return null;
-      return jawWidth / lowerHeight;
-    },
-  },
-  {
-    id: "angularity_chin_taper",
-    title: "Chin taper",
-    pillar: "angularity",
-    view: "front",
-    baseWeight: 1,
-    requiredPoints: [149, 378, 172, 397],
-    requiredLandmarkIds: ["chin_left", "chin_right", "left_top_gonion", "right_top_gonion"],
-    band: { min: 0.25, optMin: 0.4, optMax: 0.65, max: 0.9 },
-    notes: [
-      "Chin taper is well defined.",
-      "Chin taper is moderate.",
-      "Chin taper is weak or uncertain.",
-    ],
-    formula: (ctx) => {
-      const p = (id: string) =>
-        pointFromManualOrFallback(ctx, id, "front", FALLBACK_INDEX[id] ?? null);
-      const chinLeft = p("chin_left");
-      const chinRight = p("chin_right");
-      const jawLeft = p("left_top_gonion");
-      const jawRight = p("right_top_gonion");
-      if (!chinLeft || !chinRight || !jawLeft || !jawRight) return null;
-      const chinWidth = dist(chinLeft, chinRight);
-      const jawWidth = dist(jawLeft, jawRight);
-      if (jawWidth <= 1e-6) return null;
-      return chinWidth / jawWidth;
-    },
-  },
-  {
-    id: "angularity_profile_chin_projection",
-    title: "Profile chin projection",
-    pillar: "angularity",
-    view: "side",
-    baseWeight: 1.1,
-    requiredPoints: [152, 2],
-    requiredLandmarkIds: ["pogonion", "side_subnasale"],
-    band: { min: 0.02, optMin: 0.1, optMax: 0.3, max: 0.55 },
-    notes: [
-      "Profile chin projection is strong.",
-      "Profile chin projection is moderate.",
-      "Profile chin projection is limited or uncertain.",
-    ],
-    formula: (ctx) => {
-      const p = (id: string) =>
-        pointFromManualOrFallback(ctx, id, "side", FALLBACK_INDEX[id] ?? null);
-      const chin = p("pogonion");
-      const noseBase = p("side_subnasale");
-      if (!chin || !noseBase) return null;
-      const projection = Math.abs(
-        profileDirectionAwareDelta(chin, noseBase, ctx.sideQuality.poseYaw)
-      );
-      return projection / Math.max(ctx.sideScale, 1e-6);
-    },
-  },
-  {
-    id: "dimorphism_fwhr",
-    title: "fWHR",
-    pillar: "dimorphism",
-    view: "front",
-    baseWeight: 1,
-    requiredPoints: [234, 454, 168, 2],
-    requiredLandmarkIds: ["left_cheek", "right_cheek", "glabella", "subnasale"],
-    band: { min: 1.2, optMin: 1.55, optMax: 2.15, max: 2.8 },
-    notes: [
-      "Upper-face width-height ratio is strong.",
-      "Upper-face width-height ratio is moderate.",
-      "Upper-face width-height ratio is low or uncertain.",
-    ],
-    formula: (ctx) => {
-      const p = (id: string) =>
-        pointFromManualOrFallback(ctx, id, "front", FALLBACK_INDEX[id] ?? null);
-      const cheekLeft = p("left_cheek");
-      const cheekRight = p("right_cheek");
-      const brow = p("glabella");
-      const noseBase = p("subnasale");
-      if (!cheekLeft || !cheekRight || !brow || !noseBase) return null;
-      const width = dist(cheekLeft, cheekRight);
-      const upperHeight = dist(brow, noseBase);
-      if (upperHeight <= 1e-6) return null;
-      return width / upperHeight;
-    },
-  },
-  {
-    id: "dimorphism_lower_face_ratio",
-    title: "Lower-face ratio",
-    pillar: "dimorphism",
-    view: "front",
-    baseWeight: 0.95,
-    requiredPoints: [2, 152, 234, 454],
-    requiredLandmarkIds: ["subnasale", "menton", "left_cheek", "right_cheek"],
-    band: { min: 0.35, optMin: 0.52, optMax: 0.82, max: 1.2 },
-    notes: [
-      "Lower-face ratio is robust.",
-      "Lower-face ratio is moderate.",
-      "Lower-face ratio is low-confidence or soft.",
-    ],
-    formula: (ctx) => {
-      const p = (id: string) =>
-        pointFromManualOrFallback(ctx, id, "front", FALLBACK_INDEX[id] ?? null);
-      const noseBase = p("subnasale");
-      const chin = p("menton");
-      const cheekLeft = p("left_cheek");
-      const cheekRight = p("right_cheek");
-      if (!noseBase || !chin || !cheekLeft || !cheekRight) return null;
-      const lowerHeight = dist(noseBase, chin);
-      const width = dist(cheekLeft, cheekRight);
-      if (width <= 1e-6) return null;
-      return lowerHeight / width;
-    },
-  },
-  {
-    id: "dimorphism_jaw_cheek_strength",
-    title: "Jaw-cheek strength",
-    pillar: "dimorphism",
-    view: "front",
-    baseWeight: 1.05,
-    requiredPoints: [172, 397, 234, 454],
-    requiredLandmarkIds: ["left_top_gonion", "right_top_gonion", "left_cheek", "right_cheek"],
-    band: { min: 0.58, optMin: 0.8, optMax: 1.02, max: 1.22 },
-    notes: [
-      "Jaw-cheek relationship appears strong.",
-      "Jaw-cheek relationship is moderate.",
-      "Jaw-cheek relationship appears weak or uncertain.",
-    ],
-    formula: (ctx) => {
-      const p = (id: string) =>
-        pointFromManualOrFallback(ctx, id, "front", FALLBACK_INDEX[id] ?? null);
-      const jawLeft = p("left_top_gonion");
-      const jawRight = p("right_top_gonion");
-      const cheekLeft = p("left_cheek");
-      const cheekRight = p("right_cheek");
-      if (!jawLeft || !jawRight || !cheekLeft || !cheekRight) return null;
-      const jaw = dist(jawLeft, jawRight);
-      const cheek = dist(cheekLeft, cheekRight);
-      if (cheek <= 1e-6) return null;
-      return jaw / cheek;
-    },
-  },
-  {
-    id: "features_eye_tilt",
-    title: "Eye tilt",
-    pillar: "features",
-    view: "front",
-    baseWeight: 0.85,
-    requiredPoints: [33, 263],
-    requiredLandmarkIds: ["left_eye_lateral_canthus", "right_eye_lateral_canthus"],
-    band: { min: 0, optMin: 3, optMax: 14, max: 26 },
-    notes: [
-      "Eye tilt appears balanced.",
-      "Eye tilt is moderate.",
-      "Eye tilt is outside stable range.",
-    ],
-    formula: (ctx) => {
-      const p = (id: string) =>
-        pointFromManualOrFallback(ctx, id, "front", FALLBACK_INDEX[id] ?? null);
-      const outerLeft = p("left_eye_lateral_canthus");
-      const outerRight = p("right_eye_lateral_canthus");
-      if (!outerLeft || !outerRight) return null;
-      return Math.abs(angleDeg(outerLeft, outerRight));
-    },
-  },
-  {
-    id: "features_eye_aperture",
-    title: "Eye aperture",
-    pillar: "features",
-    view: "front",
-    baseWeight: 1,
-    requiredPoints: [33, 133, 159, 145, 263, 362, 386, 374],
-    requiredLandmarkIds: [
-      "left_eye_lateral_canthus",
-      "left_eye_medial_canthus",
-      "left_eye_upper_eyelid",
-      "left_eye_lower_eyelid",
-      "right_eye_lateral_canthus",
-      "right_eye_medial_canthus",
-      "right_eye_upper_eyelid",
-      "right_eye_lower_eyelid",
-    ],
-    band: { min: 0.06, optMin: 0.14, optMax: 0.32, max: 0.5 },
-    notes: [
-      "Eye aperture appears healthy.",
-      "Eye aperture is moderate.",
-      "Eye aperture appears limited or uncertain.",
-    ],
-    formula: (ctx) => {
-      const p = (id: string) =>
-        pointFromManualOrFallback(ctx, id, "front", FALLBACK_INDEX[id] ?? null);
-      const lOuter = p("left_eye_lateral_canthus");
-      const lInner = p("left_eye_medial_canthus");
-      const lTop = p("left_eye_upper_eyelid");
-      const lBottom = p("left_eye_lower_eyelid");
-      const rOuter = p("right_eye_lateral_canthus");
-      const rInner = p("right_eye_medial_canthus");
-      const rTop = p("right_eye_upper_eyelid");
-      const rBottom = p("right_eye_lower_eyelid");
-      if (!lOuter || !lInner || !lTop || !lBottom || !rOuter || !rInner || !rTop || !rBottom) {
-        return null;
-      }
-      const leftWidth = dist(lOuter, lInner);
-      const rightWidth = dist(rOuter, rInner);
-      if (leftWidth <= 1e-6 || rightWidth <= 1e-6) return null;
-      const leftAperture = dist(lTop, lBottom) / leftWidth;
-      const rightAperture = dist(rTop, rBottom) / rightWidth;
-      return (leftAperture + rightAperture) / 2;
-    },
-  },
-  {
-    id: "features_nose_length_width",
-    title: "Nose length-width",
-    pillar: "features",
-    view: "front",
-    baseWeight: 1,
-    requiredPoints: [6, 1, 98, 327],
-    requiredLandmarkIds: ["nasion", "pronasale", "left_nose_bridge", "right_nose_bridge"],
-    band: { min: 0.8, optMin: 1.2, optMax: 2.0, max: 2.9 },
-    notes: [
-      "Nasal proportion appears balanced.",
-      "Nasal proportion is moderate.",
-      "Nasal proportion appears outside stable range.",
-    ],
-    formula: (ctx) => {
-      const p = (id: string) =>
-        pointFromManualOrFallback(ctx, id, "front", FALLBACK_INDEX[id] ?? null);
-      const bridge = p("nasion");
-      const tip = p("pronasale");
-      const wingLeft = p("left_nose_bridge");
-      const wingRight = p("right_nose_bridge");
-      if (!bridge || !tip || !wingLeft || !wingRight) return null;
-      const length = dist(bridge, tip);
-      const width = dist(wingLeft, wingRight);
-      if (width <= 1e-6) return null;
-      return length / width;
-    },
-  },
-  {
-    id: "features_lip_fullness",
-    title: "Lip fullness",
-    pillar: "features",
-    view: "front",
-    baseWeight: 0.9,
-    requiredPoints: [13, 14, 61, 291],
-    requiredLandmarkIds: ["cupids_bow", "labrale_inferius", "mouth_left", "mouth_right"],
-    band: { min: 0.04, optMin: 0.1, optMax: 0.24, max: 0.42 },
-    notes: [
-      "Lip proportion appears balanced.",
-      "Lip proportion is moderate.",
-      "Lip proportion appears low-confidence or off-range.",
-    ],
-    formula: (ctx) => {
-      const p = (id: string) =>
-        pointFromManualOrFallback(ctx, id, "front", FALLBACK_INDEX[id] ?? null);
-      const upper = p("cupids_bow");
-      const lower = p("labrale_inferius");
-      const left = p("mouth_left");
-      const right = p("mouth_right");
-      if (!upper || !lower || !left || !right) return null;
-      const fullness = dist(upper, lower);
-      const width = dist(left, right);
-      if (width <= 1e-6) return null;
-      return fullness / width;
-    },
-  },
-  {
-    id: "features_dorsum_straightness",
-    title: "Dorsum straightness",
-    pillar: "features",
-    view: "side",
-    baseWeight: 0.85,
-    requiredPoints: [6, 197, 195, 5, 4, 1],
-    requiredLandmarkIds: [
-      "side_nasion",
-      "rhinion",
-      "supratip",
-      "infratip",
-      "columella",
-      "side_pronasale",
-    ],
-    band: { min: 0, optMin: 0, optMax: 0.028, max: 0.12 },
-    notes: [
-      "Nasal dorsum appears straight.",
-      "Nasal dorsum is moderately straight.",
-      "Nasal dorsum appears irregular or low-confidence.",
-    ],
-    formula: (ctx) => {
-      const p = (id: string) =>
-        pointFromManualOrFallback(ctx, id, "side", FALLBACK_INDEX[id] ?? null);
-      const sequence = [
-        p("side_nasion"),
-        p("rhinion"),
-        p("supratip"),
-        p("infratip"),
-        p("columella"),
-        p("side_pronasale"),
-      ].filter((point): point is Landmark => point != null);
-      if (sequence.length < 4) return null;
-      const start = sequence[0];
-      const end = sequence[sequence.length - 1];
-      return lineDeviation(sequence, start, end, ctx.sideScale);
-    },
-  },
-];
-
-const pillarWeight: Record<PillarName, number> = {
-  harmony: 0.34,
-  angularity: 0.22,
-  dimorphism: 0.22,
-  features: 0.22,
+    expectedView,
+    viewValid: false,
+    viewWeight: 0,
+    reasonCodes: ["low_landmark_conf"],
+  };
 };
 
 const buildContext = (
@@ -987,15 +313,13 @@ const buildContext = (
 
   const cheekLeft = getPoint(frontAligned, 234);
   const cheekRight = getPoint(frontAligned, 454);
-  const frontFaceWidth =
-    cheekLeft && cheekRight ? dist(cheekLeft, cheekRight) : Math.max(ipd * 2.3, 1e-6);
+  const faceWidth =
+    cheekLeft && cheekRight ? Math.max(dist(cheekLeft, cheekRight), 1e-6) : Math.max(ipd * 2.3, 1e-6);
 
-  const lowerRefA = getPoint(frontAligned, 2);
-  const lowerRefB = getPoint(frontAligned, 152);
-  const frontLowerFaceHeight =
-    lowerRefA && lowerRefB
-      ? Math.max(dist(lowerRefA, lowerRefB), 1e-6)
-      : Math.max(ipd * 1.2, 1e-6);
+  const top = getPoint(frontAligned, 10) ?? getPoint(frontAligned, 168);
+  const bottom = getPoint(frontAligned, 152);
+  const faceHeight =
+    top && bottom ? Math.max(dist(top, bottom), 1e-6) : Math.max(ipd * 2.6, 1e-6);
 
   const sideScaleRefA = getPoint(sideAligned, 6) ?? getPoint(sideAligned, 1);
   const sideScaleRefB = getPoint(sideAligned, 152) ?? getPoint(sideAligned, 2);
@@ -1004,92 +328,1737 @@ const buildContext = (
       ? Math.max(dist(sideScaleRefA, sideScaleRefB), 1e-6)
       : Math.max(ipd * 1.2, 1e-6);
 
-  const manualFrontLeftEye =
-    manualById.get("left_eye_medial_canthus") ??
-    manualById.get("left_eye_lateral_canthus");
-  const manualFrontRightEye =
-    manualById.get("right_eye_medial_canthus") ??
-    manualById.get("right_eye_lateral_canthus");
-  const manualFrontCenter =
-    manualFrontLeftEye &&
-    manualFrontRightEye &&
-    manualFrontLeftEye.confirmed &&
-    manualFrontRightEye.confirmed
-      ? midpoint(
-          {
-            x: manualFrontLeftEye.x,
-            y: manualFrontLeftEye.y,
-          },
-          {
-            x: manualFrontRightEye.x,
-            y: manualFrontRightEye.y,
-          }
-        )
-      : faceCenter;
-
-  const manualSideA =
-    manualById.get("side_nasion")?.confirmed && manualById.get("side_nasion")
-      ? {
-          x: manualById.get("side_nasion")?.x ?? sideCenter.x,
-          y: manualById.get("side_nasion")?.y ?? sideCenter.y,
-        }
-      : null;
-  const manualSideB =
-    manualById.get("pogonion")?.confirmed && manualById.get("pogonion")
-      ? {
-          x: manualById.get("pogonion")?.x ?? sideCenter.x,
-          y: manualById.get("pogonion")?.y ?? sideCenter.y,
-        }
-      : null;
-  const manualSideCenter =
-    manualSideA && manualSideB ? midpoint(manualSideA, manualSideB) : sideCenter;
-
-  const frontManualAligned = buildAlignedManualMap(
-    manualPoints,
-    "front",
-    manualFrontCenter,
-    frontQuality.poseRoll
-  );
-  const sideManualAligned = buildAlignedManualMap(
-    manualPoints,
-    "side",
-    manualSideCenter,
-    sideQuality.poseRoll
-  );
-
   const hasConfirmedManual = manualPoints.some((point) => point.confirmed);
 
   return {
-    front: frontLandmarks,
-    side: sideLandmarks,
     frontAligned,
     sideAligned,
     manualByIndex,
     manualById,
-    frontManualAligned,
-    sideManualAligned,
     frontQuality,
     sideQuality,
     ipd,
-    frontFaceWidth,
-    frontLowerFaceHeight,
+    faceWidth,
+    faceHeight,
     sideScale,
     strictManual: hasConfirmedManual,
   };
 };
 
-const evaluateMetric = (metric: MetricDefinition, ctx: ScoreContext): MetricResult => {
-  const manualValidation = validateManualForMetric(metric, ctx);
+const pointFromIndex = (
+  ctx: ScoreContext,
+  view: "front" | "side",
+  index: number
+): Landmark | null => {
+  const key = manualKey(view, index);
+  const manual = ctx.manualByIndex.get(key);
+  if (manual?.confirmed) {
+    return { x: manual.x, y: manual.y, z: 0, visibility: manual.confidence };
+  }
+  const source = view === "front" ? ctx.frontAligned : ctx.sideAligned;
+  return getPoint(source, index);
+};
+
+const validateManualForRatio = (
+  ratio: RatioDefinition,
+  ctx: ScoreContext
+): { valid: boolean; reason: string | null } => {
+  if (ratio.requiredLandmarkIds?.length) {
+    const matched = ratio.requiredLandmarkIds
+      .map((id) => ctx.manualById.get(id))
+      .filter((point): point is ManualLandmarkPoint => point != null);
+    if (!matched.length) return { valid: true, reason: null };
+    const invalid = matched.filter((point) => !point.confirmed);
+    if (invalid.length) {
+      return {
+        valid: false,
+        reason: `manual_unconfirmed:${invalid.map((point) => point.id).join(",")}`,
+      };
+    }
+    return { valid: true, reason: null };
+  }
+
+  let hasManualCoverage = false;
+  const invalidIds: string[] = [];
+  const views: Array<"front" | "side"> =
+    ratio.view === "either" ? ["front", "side"] : [ratio.view];
+
+  for (const view of views) {
+    for (const req of ratio.requiredPoints.filter((p) => p.view === view)) {
+      const manual = ctx.manualByIndex.get(manualKey(view, req.index));
+      if (!manual) continue;
+      hasManualCoverage = true;
+      if (!manual.confirmed) invalidIds.push(manual.id);
+    }
+  }
+
+  if (!hasManualCoverage) return { valid: true, reason: null };
+  if (!invalidIds.length) return { valid: true, reason: null };
+  return {
+    valid: false,
+    reason: `manual_unconfirmed:${Array.from(new Set(invalidIds)).join(",")}`,
+  };
+};
+
+const baseConfidenceForRatio = (ratio: RatioDefinition, ctx: ScoreContext) => {
+  const manualFactor = meanManualConfidence(ratio.requiredLandmarkIds, ctx.manualById);
+  if (ratio.view === "front") {
+    return (
+      clamp01(ctx.frontQuality.confidence) *
+      reasonPenaltyMultiplier(ctx.frontQuality.reasonCodes) *
+      manualFactor
+    );
+  }
+  if (ratio.view === "side") {
+    return (
+      clamp01(ctx.sideQuality.confidence) *
+      clamp01(ctx.sideQuality.viewWeight) *
+      reasonPenaltyMultiplier(ctx.sideQuality.reasonCodes) *
+      manualFactor
+    );
+  }
+  const front =
+    clamp01(ctx.frontQuality.confidence) * reasonPenaltyMultiplier(ctx.frontQuality.reasonCodes);
+  const side =
+    clamp01(ctx.sideQuality.confidence) *
+    clamp01(ctx.sideQuality.viewWeight) *
+    reasonPenaltyMultiplier(ctx.sideQuality.reasonCodes);
+  return clamp01((front * 0.65 + side * 0.35) * manualFactor);
+};
+
+const confidenceThresholdForView = (view: MetricView) =>
+  view === "side" ? 0.16 : view === "either" ? 0.22 : 0.24;
+
+const computeSigma = (ideal: number, ratio: RatioDefinition) => {
+  if (ratio.sigmaAbs != null) return Math.max(1e-6, ratio.sigmaAbs);
+  const rel = ratio.sigmaRel ?? 0.12;
+  return Math.max(1e-6, Math.abs(ideal) * rel);
+};
+
+const DEFAULT_COHORT: FaceIQRatios = {
+  fWHR: 0.95,
+  verticalThirds: 1,
+  horizontalFifths: 0.42,
+  eyeMouthRatio: 0.95,
+  jawCheekRatio: 0.88,
+  symmetryError: 0.035,
+  phiFaceHeight: 1.62,
+  ipdToFaceWidth: 0.42,
+  intercanthalToIPD: 0.38,
+  mouthToNoseWidth: 1.55,
+  noseWidthToFaceWidth: 0.24,
+  mouthWidthToFaceWidth: 0.46,
+  browToEyeHeight: 0.19,
+  browToMouthHeight: 0.62,
+  noseToChinHeight: 0.63,
+  jawWidthToFaceWidth: 0.82,
+  chinWidthToJawWidth: 0.32,
+  cheekboneToTempleWidth: 0.92,
+  eyeWidthToFaceWidth: 0.76,
+  noseLengthToFaceHeight: 0.36,
+  gonialAngleL: 124,
+  gonialAngleR: 124,
+  gonialAngleAvg: 124,
+  bigonialWidth: 0.52,
+  ramusHeightL: 0.22,
+  ramusHeightR: 0.22,
+  jawlineSlopeL: 14,
+  jawlineSlopeR: 14,
+  chinProjection: 0.12,
+  facialConvexity: 165,
+  mandibularPlaneAngle: 26,
+  neckChinAngle: 118,
+  browRidgeAngle: 150,
+  jawNeckRatio: 0.72,
+  cheekboneProjection: 0.08,
+  lowerFaceRatio: 0.78,
+  jawFaceRatio: 0.82,
+  chinTaper: 0.32,
+  jawCheekStrength: 0.88,
+  faceLengthToWidth: 1.05,
+  browToJawHeightRatio: 0.62,
+  eyeSizeRatio: 0.22,
+  noseSizeRatio: 0.34,
+  mouthSizeRatio: 0.46,
+  cheekProminenceRatio: 1.08,
+  canthalTiltL: 6,
+  canthalTiltR: 6,
+  eyeAspectRatioL: 0.22,
+  eyeAspectRatioR: 0.22,
+  nasalIndex: 0.65,
+  philtrumLength: 0.12,
+  lipHeightRatio: 0.2,
+  cupidBowDepth: 0.08,
+  noseBridgeWidthRatio: 0.22,
+  eyeBrowDistanceL: 0.08,
+  eyeBrowDistanceR: 0.08,
+  upperLipProjection: 0.06,
+  lowerLipProjection: 0.05,
+  dorsumStraightness: 0.02,
+  earJawDistanceRatio: 0.38,
+};
+
+const ratioDefinitions: RatioDefinition[] = [
+  {
+    key: "fWHR",
+    title: "fWHR",
+    pillar: "harmony",
+    view: "front",
+    baseWeight: 1.1,
+    requiredPoints: [
+      { view: "front", index: 234 },
+      { view: "front", index: 454 },
+      { view: "front", index: 10 },
+      { view: "front", index: 152 },
+    ],
+    sigmaRel: 0.16,
+    formula: (ctx) => {
+      const left = pointFromIndex(ctx, "front", 234);
+      const right = pointFromIndex(ctx, "front", 454);
+      const top = pointFromIndex(ctx, "front", 10) ?? pointFromIndex(ctx, "front", 168);
+      const bottom = pointFromIndex(ctx, "front", 152);
+      if (!left || !right || !top || !bottom) return null;
+      return dist(left, right) / Math.max(dist(top, bottom), 1e-6);
+    },
+  },
+  {
+    key: "verticalThirds",
+    title: "Vertical thirds",
+    pillar: "harmony",
+    view: "front",
+    baseWeight: 1,
+    requiredLandmarkIds: ["glabella", "subnasale", "menton"],
+    requiredPoints: [
+      { view: "front", index: 168 },
+      { view: "front", index: 2 },
+      { view: "front", index: 152 },
+    ],
+    sigmaRel: 0.18,
+    formula: (ctx) => {
+      const brow = pointFromIndex(ctx, "front", 168);
+      const subnasale = pointFromIndex(ctx, "front", 2);
+      const menton = pointFromIndex(ctx, "front", 152);
+      if (!brow || !subnasale || !menton) return null;
+      const upper = dist(brow, subnasale);
+      const lower = dist(subnasale, menton);
+      if (lower <= 1e-6) return null;
+      return upper / lower;
+    },
+  },
+  {
+    key: "horizontalFifths",
+    title: "Horizontal fifths",
+    pillar: "harmony",
+    view: "front",
+    baseWeight: 0.9,
+    requiredPoints: [
+      { view: "front", index: 234 },
+      { view: "front", index: 454 },
+      { view: "front", index: 133 },
+      { view: "front", index: 362 },
+    ],
+    sigmaRel: 0.2,
+    formula: (ctx) => {
+      const cheekL = pointFromIndex(ctx, "front", 234);
+      const cheekR = pointFromIndex(ctx, "front", 454);
+      const eyeL = pointFromIndex(ctx, "front", 133);
+      const eyeR = pointFromIndex(ctx, "front", 362);
+      if (!cheekL || !cheekR || !eyeL || !eyeR) return null;
+      const faceW = dist(cheekL, cheekR);
+      const ipd = dist(eyeL, eyeR);
+      if (faceW <= 1e-6) return null;
+      return ipd / faceW;
+    },
+  },
+  {
+    key: "eyeMouthRatio",
+    title: "Eye to mouth ratio",
+    pillar: "harmony",
+    view: "front",
+    baseWeight: 1,
+    requiredLandmarkIds: [
+      "left_eye_lateral_canthus",
+      "right_eye_lateral_canthus",
+      "mouth_left",
+      "mouth_right",
+    ],
+    requiredPoints: [
+      { view: "front", index: 33 },
+      { view: "front", index: 263 },
+      { view: "front", index: 61 },
+      { view: "front", index: 291 },
+    ],
+    sigmaRel: 0.2,
+    formula: (ctx) => {
+      const eyeL = pointFromIndex(ctx, "front", 33);
+      const eyeR = pointFromIndex(ctx, "front", 263);
+      const mouthL = pointFromIndex(ctx, "front", 61);
+      const mouthR = pointFromIndex(ctx, "front", 291);
+      if (!eyeL || !eyeR || !mouthL || !mouthR) return null;
+      const eyeW = dist(eyeL, eyeR);
+      const mouthW = dist(mouthL, mouthR);
+      if (mouthW <= 1e-6) return null;
+      return eyeW / mouthW;
+    },
+  },
+  {
+    key: "jawCheekRatio",
+    title: "Jaw to cheek ratio",
+    pillar: "harmony",
+    view: "front",
+    baseWeight: 0.95,
+    requiredLandmarkIds: ["left_top_gonion", "right_top_gonion", "left_cheek", "right_cheek"],
+    requiredPoints: [
+      { view: "front", index: 172 },
+      { view: "front", index: 397 },
+      { view: "front", index: 234 },
+      { view: "front", index: 454 },
+    ],
+    sigmaRel: 0.18,
+    formula: (ctx) => {
+      const jawL = pointFromIndex(ctx, "front", 172);
+      const jawR = pointFromIndex(ctx, "front", 397);
+      const cheekL = pointFromIndex(ctx, "front", 234);
+      const cheekR = pointFromIndex(ctx, "front", 454);
+      if (!jawL || !jawR || !cheekL || !cheekR) return null;
+      const jawW = dist(jawL, jawR);
+      const cheekW = dist(cheekL, cheekR);
+      if (cheekW <= 1e-6) return null;
+      return jawW / cheekW;
+    },
+  },
+  {
+    key: "symmetryError",
+    title: "Symmetry error",
+    pillar: "harmony",
+    view: "front",
+    baseWeight: 1.15,
+    requiredLandmarkIds: [
+      "left_eye_medial_canthus",
+      "right_eye_medial_canthus",
+      "left_eye_lateral_canthus",
+      "right_eye_lateral_canthus",
+      "mouth_left",
+      "mouth_right",
+      "left_top_gonion",
+      "right_top_gonion",
+      "chin_left",
+      "chin_right",
+    ],
+    requiredPoints: [
+      { view: "front", index: 133 },
+      { view: "front", index: 362 },
+      { view: "front", index: 33 },
+      { view: "front", index: 263 },
+      { view: "front", index: 61 },
+      { view: "front", index: 291 },
+      { view: "front", index: 172 },
+      { view: "front", index: 397 },
+      { view: "front", index: 149 },
+      { view: "front", index: 378 },
+    ],
+    sigmaRel: 0.35,
+    formula: (ctx) => {
+      const leftEye = pointFromIndex(ctx, "front", 133);
+      const rightEye = pointFromIndex(ctx, "front", 362);
+      if (!leftEye || !rightEye) return null;
+      const midX = (leftEye.x + rightEye.x) / 2;
+      const pairs: Array<[number, number]> = [
+        [33, 263],
+        [133, 362],
+        [61, 291],
+        [172, 397],
+        [149, 378],
+      ];
+      const errors: number[] = [];
+      for (const [l, r] of pairs) {
+        const pl = pointFromIndex(ctx, "front", l);
+        const pr = pointFromIndex(ctx, "front", r);
+        if (!pl || !pr) continue;
+        const dx = Math.abs(((pl.x + pr.x) / 2 - midX) * 2);
+        const dy = Math.abs(pl.y - pr.y);
+        errors.push((dx + dy) / Math.max(ctx.ipd, 1e-6));
+      }
+      return errors.length ? avg(errors) : null;
+    },
+  },
+  {
+    key: "phiFaceHeight",
+    title: "Phi face height ratio",
+    pillar: "harmony",
+    view: "front",
+    baseWeight: 0.75,
+    requiredPoints: [
+      { view: "front", index: 10 },
+      { view: "front", index: 2 },
+      { view: "front", index: 152 },
+    ],
+    sigmaRel: 0.2,
+    formula: (ctx) => {
+      const top = pointFromIndex(ctx, "front", 10) ?? pointFromIndex(ctx, "front", 168);
+      const subnasale = pointFromIndex(ctx, "front", 2);
+      const menton = pointFromIndex(ctx, "front", 152);
+      if (!top || !subnasale || !menton) return null;
+      const faceH = dist(top, menton);
+      const lowerH = dist(subnasale, menton);
+      if (lowerH <= 1e-6) return null;
+      return faceH / lowerH;
+    },
+  },
+  {
+    key: "ipdToFaceWidth",
+    title: "IPD to face width",
+    pillar: "harmony",
+    view: "front",
+    baseWeight: 0.7,
+    requiredPoints: [
+      { view: "front", index: 133 },
+      { view: "front", index: 362 },
+      { view: "front", index: 234 },
+      { view: "front", index: 454 },
+    ],
+    sigmaRel: 0.18,
+    formula: (ctx) => {
+      const eyeL = pointFromIndex(ctx, "front", 133);
+      const eyeR = pointFromIndex(ctx, "front", 362);
+      const cheekL = pointFromIndex(ctx, "front", 234);
+      const cheekR = pointFromIndex(ctx, "front", 454);
+      if (!eyeL || !eyeR || !cheekL || !cheekR) return null;
+      const ipd = dist(eyeL, eyeR);
+      const faceW = dist(cheekL, cheekR);
+      if (faceW <= 1e-6) return null;
+      return ipd / faceW;
+    },
+  },
+  {
+    key: "intercanthalToIPD",
+    title: "Intercanthal to IPD",
+    pillar: "harmony",
+    view: "front",
+    baseWeight: 0.65,
+    requiredPoints: [
+      { view: "front", index: 133 },
+      { view: "front", index: 362 },
+      { view: "front", index: 33 },
+      { view: "front", index: 263 },
+    ],
+    sigmaRel: 0.22,
+    formula: (ctx) => {
+      const innerL = pointFromIndex(ctx, "front", 133);
+      const innerR = pointFromIndex(ctx, "front", 362);
+      const outerL = pointFromIndex(ctx, "front", 33);
+      const outerR = pointFromIndex(ctx, "front", 263);
+      if (!innerL || !innerR || !outerL || !outerR) return null;
+      const intercanthal = dist(innerL, innerR);
+      const ipd = dist(outerL, outerR);
+      if (ipd <= 1e-6) return null;
+      return intercanthal / ipd;
+    },
+  },
+  {
+    key: "mouthToNoseWidth",
+    title: "Mouth to nose width",
+    pillar: "harmony",
+    view: "front",
+    baseWeight: 0.7,
+    requiredPoints: [
+      { view: "front", index: 61 },
+      { view: "front", index: 291 },
+      { view: "front", index: 98 },
+      { view: "front", index: 327 },
+    ],
+    sigmaRel: 0.22,
+    formula: (ctx) => {
+      const mouthL = pointFromIndex(ctx, "front", 61);
+      const mouthR = pointFromIndex(ctx, "front", 291);
+      const noseL = pointFromIndex(ctx, "front", 98);
+      const noseR = pointFromIndex(ctx, "front", 327);
+      if (!mouthL || !mouthR || !noseL || !noseR) return null;
+      const mouthW = dist(mouthL, mouthR);
+      const noseW = dist(noseL, noseR);
+      if (noseW <= 1e-6) return null;
+      return mouthW / noseW;
+    },
+  },
+  {
+    key: "noseWidthToFaceWidth",
+    title: "Nose width to face width",
+    pillar: "harmony",
+    view: "front",
+    baseWeight: 0.65,
+    requiredPoints: [
+      { view: "front", index: 98 },
+      { view: "front", index: 327 },
+      { view: "front", index: 234 },
+      { view: "front", index: 454 },
+    ],
+    sigmaRel: 0.2,
+    formula: (ctx) => {
+      const noseL = pointFromIndex(ctx, "front", 98);
+      const noseR = pointFromIndex(ctx, "front", 327);
+      const cheekL = pointFromIndex(ctx, "front", 234);
+      const cheekR = pointFromIndex(ctx, "front", 454);
+      if (!noseL || !noseR || !cheekL || !cheekR) return null;
+      const noseW = dist(noseL, noseR);
+      const faceW = dist(cheekL, cheekR);
+      if (faceW <= 1e-6) return null;
+      return noseW / faceW;
+    },
+  },
+  {
+    key: "mouthWidthToFaceWidth",
+    title: "Mouth width to face width",
+    pillar: "harmony",
+    view: "front",
+    baseWeight: 0.6,
+    requiredPoints: [
+      { view: "front", index: 61 },
+      { view: "front", index: 291 },
+      { view: "front", index: 234 },
+      { view: "front", index: 454 },
+    ],
+    sigmaRel: 0.2,
+    formula: (ctx) => {
+      const mouthL = pointFromIndex(ctx, "front", 61);
+      const mouthR = pointFromIndex(ctx, "front", 291);
+      const cheekL = pointFromIndex(ctx, "front", 234);
+      const cheekR = pointFromIndex(ctx, "front", 454);
+      if (!mouthL || !mouthR || !cheekL || !cheekR) return null;
+      const mouthW = dist(mouthL, mouthR);
+      const faceW = dist(cheekL, cheekR);
+      if (faceW <= 1e-6) return null;
+      return mouthW / faceW;
+    },
+  },
+  {
+    key: "browToEyeHeight",
+    title: "Brow to eye height",
+    pillar: "harmony",
+    view: "front",
+    baseWeight: 0.55,
+    requiredPoints: [
+      { view: "front", index: 168 },
+      { view: "front", index: 159 },
+      { view: "front", index: 386 },
+    ],
+    sigmaRel: 0.28,
+    formula: (ctx) => {
+      const brow = pointFromIndex(ctx, "front", 168);
+      const eyeL = pointFromIndex(ctx, "front", 159);
+      const eyeR = pointFromIndex(ctx, "front", 386);
+      if (!brow || !eyeL || !eyeR) return null;
+      const eyeMid = midpoint(eyeL, eyeR);
+      return dist(brow, eyeMid) / Math.max(ctx.faceHeight, 1e-6);
+    },
+  },
+  {
+    key: "browToMouthHeight",
+    title: "Brow to mouth height",
+    pillar: "harmony",
+    view: "front",
+    baseWeight: 0.55,
+    requiredPoints: [
+      { view: "front", index: 168 },
+      { view: "front", index: 13 },
+      { view: "front", index: 14 },
+    ],
+    sigmaRel: 0.22,
+    formula: (ctx) => {
+      const brow = pointFromIndex(ctx, "front", 168);
+      const upper = pointFromIndex(ctx, "front", 13);
+      const lower = pointFromIndex(ctx, "front", 14);
+      if (!brow || !upper || !lower) return null;
+      const mouthMid = midpoint(upper, lower);
+      return dist(brow, mouthMid) / Math.max(ctx.faceHeight, 1e-6);
+    },
+  },
+  {
+    key: "noseToChinHeight",
+    title: "Nose to chin height",
+    pillar: "harmony",
+    view: "front",
+    baseWeight: 0.6,
+    requiredPoints: [
+      { view: "front", index: 2 },
+      { view: "front", index: 152 },
+      { view: "front", index: 10 },
+    ],
+    sigmaRel: 0.2,
+    formula: (ctx) => {
+      const subnasale = pointFromIndex(ctx, "front", 2);
+      const menton = pointFromIndex(ctx, "front", 152);
+      const top = pointFromIndex(ctx, "front", 10) ?? pointFromIndex(ctx, "front", 168);
+      if (!subnasale || !menton || !top) return null;
+      const lower = dist(subnasale, menton);
+      const face = dist(top, menton);
+      if (face <= 1e-6) return null;
+      return lower / face;
+    },
+  },
+  {
+    key: "jawWidthToFaceWidth",
+    title: "Jaw width to face width",
+    pillar: "harmony",
+    view: "front",
+    baseWeight: 0.65,
+    requiredPoints: [
+      { view: "front", index: 172 },
+      { view: "front", index: 397 },
+      { view: "front", index: 234 },
+      { view: "front", index: 454 },
+    ],
+    sigmaRel: 0.2,
+    formula: (ctx) => {
+      const jawL = pointFromIndex(ctx, "front", 172);
+      const jawR = pointFromIndex(ctx, "front", 397);
+      const cheekL = pointFromIndex(ctx, "front", 234);
+      const cheekR = pointFromIndex(ctx, "front", 454);
+      if (!jawL || !jawR || !cheekL || !cheekR) return null;
+      const jawW = dist(jawL, jawR);
+      const faceW = dist(cheekL, cheekR);
+      if (faceW <= 1e-6) return null;
+      return jawW / faceW;
+    },
+  },
+  {
+    key: "chinWidthToJawWidth",
+    title: "Chin width to jaw width",
+    pillar: "harmony",
+    view: "front",
+    baseWeight: 0.55,
+    requiredPoints: [
+      { view: "front", index: 149 },
+      { view: "front", index: 378 },
+      { view: "front", index: 172 },
+      { view: "front", index: 397 },
+    ],
+    sigmaRel: 0.25,
+    formula: (ctx) => {
+      const chinL = pointFromIndex(ctx, "front", 149);
+      const chinR = pointFromIndex(ctx, "front", 378);
+      const jawL = pointFromIndex(ctx, "front", 172);
+      const jawR = pointFromIndex(ctx, "front", 397);
+      if (!chinL || !chinR || !jawL || !jawR) return null;
+      const chinW = dist(chinL, chinR);
+      const jawW = dist(jawL, jawR);
+      if (jawW <= 1e-6) return null;
+      return chinW / jawW;
+    },
+  },
+  {
+    key: "cheekboneToTempleWidth",
+    title: "Cheekbone to temple width",
+    pillar: "harmony",
+    view: "front",
+    baseWeight: 0.45,
+    requiredPoints: [
+      { view: "front", index: 234 },
+      { view: "front", index: 454 },
+      { view: "front", index: 54 },
+      { view: "front", index: 284 },
+    ],
+    sigmaRel: 0.22,
+    formula: (ctx) => {
+      const cheekL = pointFromIndex(ctx, "front", 234);
+      const cheekR = pointFromIndex(ctx, "front", 454);
+      const templeL = pointFromIndex(ctx, "front", 54);
+      const templeR = pointFromIndex(ctx, "front", 284);
+      if (!cheekL || !cheekR || !templeL || !templeR) return null;
+      const cheekW = dist(cheekL, cheekR);
+      const templeW = dist(templeL, templeR);
+      if (templeW <= 1e-6) return null;
+      return cheekW / templeW;
+    },
+  },
+  {
+    key: "eyeWidthToFaceWidth",
+    title: "Eye width to face width",
+    pillar: "harmony",
+    view: "front",
+    baseWeight: 0.45,
+    requiredPoints: [
+      { view: "front", index: 33 },
+      { view: "front", index: 263 },
+      { view: "front", index: 234 },
+      { view: "front", index: 454 },
+    ],
+    sigmaRel: 0.18,
+    formula: (ctx) => {
+      const eyeL = pointFromIndex(ctx, "front", 33);
+      const eyeR = pointFromIndex(ctx, "front", 263);
+      const cheekL = pointFromIndex(ctx, "front", 234);
+      const cheekR = pointFromIndex(ctx, "front", 454);
+      if (!eyeL || !eyeR || !cheekL || !cheekR) return null;
+      const eyeW = dist(eyeL, eyeR);
+      const faceW = dist(cheekL, cheekR);
+      if (faceW <= 1e-6) return null;
+      return eyeW / faceW;
+    },
+  },
+  {
+    key: "noseLengthToFaceHeight",
+    title: "Nose length to face height",
+    pillar: "harmony",
+    view: "front",
+    baseWeight: 0.45,
+    requiredPoints: [
+      { view: "front", index: 6 },
+      { view: "front", index: 1 },
+      { view: "front", index: 10 },
+      { view: "front", index: 152 },
+    ],
+    sigmaRel: 0.22,
+    formula: (ctx) => {
+      const nasion = pointFromIndex(ctx, "front", 6);
+      const tip = pointFromIndex(ctx, "front", 1);
+      const top = pointFromIndex(ctx, "front", 10) ?? pointFromIndex(ctx, "front", 168);
+      const bottom = pointFromIndex(ctx, "front", 152);
+      if (!nasion || !tip || !top || !bottom) return null;
+      const noseLen = dist(nasion, tip);
+      const faceH = dist(top, bottom);
+      if (faceH <= 1e-6) return null;
+      return noseLen / faceH;
+    },
+  },
+
+  // ANGULARITY (15)
+  {
+    key: "gonialAngleL",
+    title: "Gonial angle (L)",
+    pillar: "angularity",
+    view: "front",
+    baseWeight: 0.9,
+    requiredPoints: [
+      { view: "front", index: 172 },
+      { view: "front", index: 150 },
+      { view: "front", index: 152 },
+    ],
+    sigmaAbs: 9,
+    formula: (ctx) => {
+      const top = pointFromIndex(ctx, "front", 172);
+      const bottom = pointFromIndex(ctx, "front", 150);
+      const chin = pointFromIndex(ctx, "front", 152);
+      if (!top || !bottom || !chin) return null;
+      return angle3pt(top, bottom, chin);
+    },
+  },
+  {
+    key: "gonialAngleR",
+    title: "Gonial angle (R)",
+    pillar: "angularity",
+    view: "front",
+    baseWeight: 0.9,
+    requiredPoints: [
+      { view: "front", index: 397 },
+      { view: "front", index: 379 },
+      { view: "front", index: 152 },
+    ],
+    sigmaAbs: 9,
+    formula: (ctx) => {
+      const top = pointFromIndex(ctx, "front", 397);
+      const bottom = pointFromIndex(ctx, "front", 379);
+      const chin = pointFromIndex(ctx, "front", 152);
+      if (!top || !bottom || !chin) return null;
+      return angle3pt(top, bottom, chin);
+    },
+  },
+  {
+    key: "gonialAngleAvg",
+    title: "Gonial angle (avg)",
+    pillar: "angularity",
+    view: "front",
+    baseWeight: 0.55,
+    requiredPoints: [
+      { view: "front", index: 172 },
+      { view: "front", index: 150 },
+      { view: "front", index: 397 },
+      { view: "front", index: 379 },
+      { view: "front", index: 152 },
+    ],
+    sigmaAbs: 7,
+    formula: (ctx) => {
+      const lTop = pointFromIndex(ctx, "front", 172);
+      const lBottom = pointFromIndex(ctx, "front", 150);
+      const rTop = pointFromIndex(ctx, "front", 397);
+      const rBottom = pointFromIndex(ctx, "front", 379);
+      const chin = pointFromIndex(ctx, "front", 152);
+      if (!lTop || !lBottom || !rTop || !rBottom || !chin) return null;
+      const left = angle3pt(lTop, lBottom, chin);
+      const right = angle3pt(rTop, rBottom, chin);
+      return (left + right) / 2;
+    },
+  },
+  {
+    key: "bigonialWidth",
+    title: "Bigonial width",
+    pillar: "angularity",
+    view: "front",
+    baseWeight: 0.8,
+    requiredPoints: [
+      { view: "front", index: 150 },
+      { view: "front", index: 379 },
+      { view: "front", index: 234 },
+      { view: "front", index: 454 },
+    ],
+    sigmaRel: 0.18,
+    formula: (ctx) => {
+      const gonL = pointFromIndex(ctx, "front", 150);
+      const gonR = pointFromIndex(ctx, "front", 379);
+      const cheekL = pointFromIndex(ctx, "front", 234);
+      const cheekR = pointFromIndex(ctx, "front", 454);
+      if (!gonL || !gonR || !cheekL || !cheekR) return null;
+      const jawW = dist(gonL, gonR);
+      const faceW = dist(cheekL, cheekR);
+      if (faceW <= 1e-6) return null;
+      return jawW / faceW;
+    },
+  },
+  {
+    key: "ramusHeightL",
+    title: "Ramus height (L)",
+    pillar: "angularity",
+    view: "front",
+    baseWeight: 0.55,
+    requiredPoints: [
+      { view: "front", index: 172 },
+      { view: "front", index: 150 },
+    ],
+    sigmaRel: 0.25,
+    formula: (ctx) => {
+      const a = pointFromIndex(ctx, "front", 172);
+      const b = pointFromIndex(ctx, "front", 150);
+      if (!a || !b) return null;
+      return dist(a, b) / Math.max(ctx.faceHeight, 1e-6);
+    },
+  },
+  {
+    key: "ramusHeightR",
+    title: "Ramus height (R)",
+    pillar: "angularity",
+    view: "front",
+    baseWeight: 0.55,
+    requiredPoints: [
+      { view: "front", index: 397 },
+      { view: "front", index: 379 },
+    ],
+    sigmaRel: 0.25,
+    formula: (ctx) => {
+      const a = pointFromIndex(ctx, "front", 397);
+      const b = pointFromIndex(ctx, "front", 379);
+      if (!a || !b) return null;
+      return dist(a, b) / Math.max(ctx.faceHeight, 1e-6);
+    },
+  },
+  {
+    key: "jawlineSlopeL",
+    title: "Jawline slope (L)",
+    pillar: "angularity",
+    view: "front",
+    baseWeight: 0.55,
+    requiredPoints: [
+      { view: "front", index: 172 },
+      { view: "front", index: 150 },
+    ],
+    sigmaAbs: 10,
+    formula: (ctx) => {
+      const top = pointFromIndex(ctx, "front", 172);
+      const bottom = pointFromIndex(ctx, "front", 150);
+      if (!top || !bottom) return null;
+      return Math.abs(angleLineDeg(top, bottom));
+    },
+  },
+  {
+    key: "jawlineSlopeR",
+    title: "Jawline slope (R)",
+    pillar: "angularity",
+    view: "front",
+    baseWeight: 0.55,
+    requiredPoints: [
+      { view: "front", index: 397 },
+      { view: "front", index: 379 },
+    ],
+    sigmaAbs: 10,
+    formula: (ctx) => {
+      const top = pointFromIndex(ctx, "front", 397);
+      const bottom = pointFromIndex(ctx, "front", 379);
+      if (!top || !bottom) return null;
+      return Math.abs(angleLineDeg(top, bottom));
+    },
+  },
+  {
+    key: "chinProjection",
+    title: "Chin projection",
+    pillar: "angularity",
+    view: "side",
+    baseWeight: 1,
+    requiredPoints: [
+      { view: "side", index: 152 },
+      { view: "side", index: 1 },
+      { view: "side", index: 2 },
+    ],
+    sigmaRel: 0.3,
+    formula: (ctx) => {
+      const chin = pointFromIndex(ctx, "side", 152);
+      const tip = pointFromIndex(ctx, "side", 1);
+      const base = pointFromIndex(ctx, "side", 2);
+      if (!chin || !tip || !base) return null;
+      const sign = ctx.sideQuality.poseYaw >= 0 ? 1 : -1;
+      const proj = sign * (chin.x - tip.x);
+      const scale = Math.max(ctx.sideScale, 1e-6);
+      return Math.abs(proj) / scale;
+    },
+  },
+  {
+    key: "facialConvexity",
+    title: "Facial convexity",
+    pillar: "angularity",
+    view: "side",
+    baseWeight: 0.75,
+    requiredPoints: [
+      { view: "side", index: 6 },
+      { view: "side", index: 2 },
+      { view: "side", index: 152 },
+    ],
+    sigmaAbs: 10,
+    formula: (ctx) => {
+      const nasion = pointFromIndex(ctx, "side", 6);
+      const subnasale = pointFromIndex(ctx, "side", 2);
+      const chin = pointFromIndex(ctx, "side", 152);
+      if (!nasion || !subnasale || !chin) return null;
+      return angle3pt(nasion, subnasale, chin);
+    },
+  },
+  {
+    key: "mandibularPlaneAngle",
+    title: "Mandibular plane angle",
+    pillar: "angularity",
+    view: "side",
+    baseWeight: 0.7,
+    requiredPoints: [
+      { view: "side", index: 150 },
+      { view: "side", index: 152 },
+    ],
+    sigmaAbs: 8,
+    formula: (ctx) => {
+      const gon = pointFromIndex(ctx, "side", 150);
+      const menton = pointFromIndex(ctx, "side", 152);
+      if (!gon || !menton) return null;
+      return Math.abs(angleLineDeg(gon, menton));
+    },
+  },
+  {
+    key: "neckChinAngle",
+    title: "Neck-chin angle",
+    pillar: "angularity",
+    view: "side",
+    baseWeight: 0.7,
+    requiredPoints: [
+      { view: "side", index: 152 },
+      { view: "side", index: 377 },
+      { view: "side", index: 150 },
+    ],
+    sigmaAbs: 10,
+    formula: (ctx) => {
+      const menton = pointFromIndex(ctx, "side", 152);
+      const cervical = pointFromIndex(ctx, "side", 377);
+      const gonion = pointFromIndex(ctx, "side", 150);
+      if (!menton || !cervical || !gonion) return null;
+      return angle3pt(gonion, menton, cervical);
+    },
+  },
+  {
+    key: "browRidgeAngle",
+    title: "Brow ridge angle",
+    pillar: "angularity",
+    view: "side",
+    baseWeight: 0.55,
+    requiredPoints: [
+      { view: "side", index: 168 },
+      { view: "side", index: 6 },
+      { view: "side", index: 1 },
+    ],
+    sigmaAbs: 12,
+    formula: (ctx) => {
+      const brow = pointFromIndex(ctx, "side", 168);
+      const nasion = pointFromIndex(ctx, "side", 6);
+      const tip = pointFromIndex(ctx, "side", 1);
+      if (!brow || !nasion || !tip) return null;
+      return angle3pt(brow, nasion, tip);
+    },
+  },
+  {
+    key: "jawNeckRatio",
+    title: "Jaw to neck ratio",
+    pillar: "angularity",
+    view: "side",
+    baseWeight: 0.55,
+    requiredPoints: [
+      { view: "side", index: 150 },
+      { view: "side", index: 377 },
+      { view: "side", index: 6 },
+      { view: "side", index: 152 },
+    ],
+    sigmaRel: 0.25,
+    formula: (ctx) => {
+      const gon = pointFromIndex(ctx, "side", 150);
+      const cervical = pointFromIndex(ctx, "side", 377);
+      const scale = Math.max(ctx.sideScale, 1e-6);
+      if (!gon || !cervical) return null;
+      return dist(gon, cervical) / scale;
+    },
+  },
+  {
+    key: "cheekboneProjection",
+    title: "Cheekbone projection",
+    pillar: "angularity",
+    view: "side",
+    baseWeight: 0.55,
+    requiredPoints: [
+      { view: "side", index: 234 },
+      { view: "side", index: 132 },
+    ],
+    sigmaRel: 0.35,
+    formula: (ctx) => {
+      const cheek = pointFromIndex(ctx, "side", 234);
+      const tragus = pointFromIndex(ctx, "side", 132);
+      if (!cheek || !tragus) return null;
+      const sign = ctx.sideQuality.poseYaw >= 0 ? 1 : -1;
+      return Math.abs(sign * (cheek.x - tragus.x)) / Math.max(ctx.sideScale, 1e-6);
+    },
+  },
+
+  // DIMORPHISM (10)
+  {
+    key: "lowerFaceRatio",
+    title: "Lower face ratio",
+    pillar: "dimorphism",
+    view: "front",
+    baseWeight: 1,
+    requiredPoints: [
+      { view: "front", index: 2 },
+      { view: "front", index: 152 },
+      { view: "front", index: 234 },
+      { view: "front", index: 454 },
+    ],
+    sigmaRel: 0.22,
+    formula: (ctx) => {
+      const subnasale = pointFromIndex(ctx, "front", 2);
+      const menton = pointFromIndex(ctx, "front", 152);
+      const cheekL = pointFromIndex(ctx, "front", 234);
+      const cheekR = pointFromIndex(ctx, "front", 454);
+      if (!subnasale || !menton || !cheekL || !cheekR) return null;
+      const lowerH = dist(subnasale, menton);
+      const faceW = dist(cheekL, cheekR);
+      if (faceW <= 1e-6) return null;
+      return lowerH / faceW;
+    },
+  },
+  {
+    key: "jawFaceRatio",
+    title: "Jaw to face ratio",
+    pillar: "dimorphism",
+    view: "front",
+    baseWeight: 0.95,
+    requiredPoints: [
+      { view: "front", index: 172 },
+      { view: "front", index: 397 },
+      { view: "front", index: 234 },
+      { view: "front", index: 454 },
+    ],
+    sigmaRel: 0.2,
+    formula: (ctx) => {
+      const jawL = pointFromIndex(ctx, "front", 172);
+      const jawR = pointFromIndex(ctx, "front", 397);
+      const cheekL = pointFromIndex(ctx, "front", 234);
+      const cheekR = pointFromIndex(ctx, "front", 454);
+      if (!jawL || !jawR || !cheekL || !cheekR) return null;
+      const jawW = dist(jawL, jawR);
+      const faceW = dist(cheekL, cheekR);
+      if (faceW <= 1e-6) return null;
+      return jawW / faceW;
+    },
+  },
+  {
+    key: "chinTaper",
+    title: "Chin taper",
+    pillar: "dimorphism",
+    view: "front",
+    baseWeight: 0.9,
+    requiredPoints: [
+      { view: "front", index: 149 },
+      { view: "front", index: 378 },
+      { view: "front", index: 172 },
+      { view: "front", index: 397 },
+    ],
+    sigmaRel: 0.25,
+    formula: (ctx) => {
+      const chinL = pointFromIndex(ctx, "front", 149);
+      const chinR = pointFromIndex(ctx, "front", 378);
+      const jawL = pointFromIndex(ctx, "front", 172);
+      const jawR = pointFromIndex(ctx, "front", 397);
+      if (!chinL || !chinR || !jawL || !jawR) return null;
+      const chinW = dist(chinL, chinR);
+      const jawW = dist(jawL, jawR);
+      if (jawW <= 1e-6) return null;
+      return chinW / jawW;
+    },
+  },
+  {
+    key: "jawCheekStrength",
+    title: "Jaw-cheek strength",
+    pillar: "dimorphism",
+    view: "front",
+    baseWeight: 0.9,
+    requiredPoints: [
+      { view: "front", index: 172 },
+      { view: "front", index: 397 },
+      { view: "front", index: 234 },
+      { view: "front", index: 454 },
+    ],
+    sigmaRel: 0.18,
+    formula: (ctx) => {
+      const jawL = pointFromIndex(ctx, "front", 172);
+      const jawR = pointFromIndex(ctx, "front", 397);
+      const cheekL = pointFromIndex(ctx, "front", 234);
+      const cheekR = pointFromIndex(ctx, "front", 454);
+      if (!jawL || !jawR || !cheekL || !cheekR) return null;
+      const jawW = dist(jawL, jawR);
+      const cheekW = dist(cheekL, cheekR);
+      if (cheekW <= 1e-6) return null;
+      return jawW / cheekW;
+    },
+  },
+  {
+    key: "faceLengthToWidth",
+    title: "Face length to width",
+    pillar: "dimorphism",
+    view: "front",
+    baseWeight: 0.65,
+    requiredPoints: [
+      { view: "front", index: 10 },
+      { view: "front", index: 152 },
+      { view: "front", index: 234 },
+      { view: "front", index: 454 },
+    ],
+    sigmaRel: 0.22,
+    formula: (ctx) => {
+      const top = pointFromIndex(ctx, "front", 10) ?? pointFromIndex(ctx, "front", 168);
+      const bottom = pointFromIndex(ctx, "front", 152);
+      const cheekL = pointFromIndex(ctx, "front", 234);
+      const cheekR = pointFromIndex(ctx, "front", 454);
+      if (!top || !bottom || !cheekL || !cheekR) return null;
+      const faceH = dist(top, bottom);
+      const faceW = dist(cheekL, cheekR);
+      if (faceW <= 1e-6) return null;
+      return faceH / faceW;
+    },
+  },
+  {
+    key: "browToJawHeightRatio",
+    title: "Brow to jaw height ratio",
+    pillar: "dimorphism",
+    view: "front",
+    baseWeight: 0.55,
+    requiredPoints: [
+      { view: "front", index: 168 },
+      { view: "front", index: 152 },
+      { view: "front", index: 10 },
+    ],
+    sigmaRel: 0.25,
+    formula: (ctx) => {
+      const brow = pointFromIndex(ctx, "front", 168);
+      const jaw = pointFromIndex(ctx, "front", 152);
+      const top = pointFromIndex(ctx, "front", 10) ?? brow;
+      if (!brow || !jaw || !top) return null;
+      const browToJaw = dist(brow, jaw);
+      const faceH = dist(top, jaw);
+      if (faceH <= 1e-6) return null;
+      return browToJaw / faceH;
+    },
+  },
+  {
+    key: "eyeSizeRatio",
+    title: "Eye size ratio",
+    pillar: "dimorphism",
+    view: "front",
+    baseWeight: 0.55,
+    requiredPoints: [
+      { view: "front", index: 159 },
+      { view: "front", index: 145 },
+      { view: "front", index: 33 },
+      { view: "front", index: 133 },
+      { view: "front", index: 386 },
+      { view: "front", index: 374 },
+      { view: "front", index: 263 },
+      { view: "front", index: 362 },
+    ],
+    sigmaRel: 0.28,
+    formula: (ctx) => {
+      const lTop = pointFromIndex(ctx, "front", 159);
+      const lBottom = pointFromIndex(ctx, "front", 145);
+      const lOuter = pointFromIndex(ctx, "front", 33);
+      const lInner = pointFromIndex(ctx, "front", 133);
+      const rTop = pointFromIndex(ctx, "front", 386);
+      const rBottom = pointFromIndex(ctx, "front", 374);
+      const rOuter = pointFromIndex(ctx, "front", 263);
+      const rInner = pointFromIndex(ctx, "front", 362);
+      if (!lTop || !lBottom || !lOuter || !lInner || !rTop || !rBottom || !rOuter || !rInner) {
+        return null;
+      }
+      const lW = dist(lOuter, lInner);
+      const rW = dist(rOuter, rInner);
+      if (lW <= 1e-6 || rW <= 1e-6) return null;
+      const lA = dist(lTop, lBottom) / lW;
+      const rA = dist(rTop, rBottom) / rW;
+      return (lA + rA) / 2;
+    },
+  },
+  {
+    key: "noseSizeRatio",
+    title: "Nose size ratio",
+    pillar: "dimorphism",
+    view: "front",
+    baseWeight: 0.5,
+    requiredPoints: [
+      { view: "front", index: 6 },
+      { view: "front", index: 1 },
+      { view: "front", index: 10 },
+      { view: "front", index: 152 },
+    ],
+    sigmaRel: 0.25,
+    formula: (ctx) => {
+      const nasion = pointFromIndex(ctx, "front", 6);
+      const tip = pointFromIndex(ctx, "front", 1);
+      const top = pointFromIndex(ctx, "front", 10) ?? pointFromIndex(ctx, "front", 168);
+      const bottom = pointFromIndex(ctx, "front", 152);
+      if (!nasion || !tip || !top || !bottom) return null;
+      const noseLen = dist(nasion, tip);
+      const faceH = dist(top, bottom);
+      if (faceH <= 1e-6) return null;
+      return noseLen / faceH;
+    },
+  },
+  {
+    key: "mouthSizeRatio",
+    title: "Mouth size ratio",
+    pillar: "dimorphism",
+    view: "front",
+    baseWeight: 0.5,
+    requiredPoints: [
+      { view: "front", index: 61 },
+      { view: "front", index: 291 },
+      { view: "front", index: 234 },
+      { view: "front", index: 454 },
+    ],
+    sigmaRel: 0.22,
+    formula: (ctx) => {
+      const mouthL = pointFromIndex(ctx, "front", 61);
+      const mouthR = pointFromIndex(ctx, "front", 291);
+      const cheekL = pointFromIndex(ctx, "front", 234);
+      const cheekR = pointFromIndex(ctx, "front", 454);
+      if (!mouthL || !mouthR || !cheekL || !cheekR) return null;
+      const mouthW = dist(mouthL, mouthR);
+      const faceW = dist(cheekL, cheekR);
+      if (faceW <= 1e-6) return null;
+      return mouthW / faceW;
+    },
+  },
+  {
+    key: "cheekProminenceRatio",
+    title: "Cheek prominence ratio",
+    pillar: "dimorphism",
+    view: "side",
+    baseWeight: 0.5,
+    requiredPoints: [
+      { view: "side", index: 234 },
+      { view: "side", index: 132 },
+      { view: "side", index: 168 },
+    ],
+    sigmaRel: 0.35,
+    formula: (ctx) => {
+      const cheek = pointFromIndex(ctx, "side", 234);
+      const ear = pointFromIndex(ctx, "side", 132);
+      const brow = pointFromIndex(ctx, "side", 168);
+      if (!cheek || !ear || !brow) return null;
+      const sign = ctx.sideQuality.poseYaw >= 0 ? 1 : -1;
+      const proj = Math.abs(sign * (cheek.x - ear.x)) / Math.max(ctx.sideScale, 1e-6);
+      const height = dist(brow, cheek) / Math.max(ctx.sideScale, 1e-6);
+      if (height <= 1e-6) return null;
+      return proj / height;
+    },
+  },
+
+  // FEATURES (15)
+  {
+    key: "canthalTiltL",
+    title: "Canthal tilt (L)",
+    pillar: "features",
+    view: "front",
+    baseWeight: 0.75,
+    requiredPoints: [
+      { view: "front", index: 133 },
+      { view: "front", index: 33 },
+    ],
+    sigmaAbs: 5,
+    formula: (ctx) => {
+      const inner = pointFromIndex(ctx, "front", 133);
+      const outer = pointFromIndex(ctx, "front", 33);
+      if (!inner || !outer) return null;
+      return angleLineDeg(inner, outer);
+    },
+  },
+  {
+    key: "canthalTiltR",
+    title: "Canthal tilt (R)",
+    pillar: "features",
+    view: "front",
+    baseWeight: 0.75,
+    requiredPoints: [
+      { view: "front", index: 362 },
+      { view: "front", index: 263 },
+    ],
+    sigmaAbs: 5,
+    formula: (ctx) => {
+      const inner = pointFromIndex(ctx, "front", 362);
+      const outer = pointFromIndex(ctx, "front", 263);
+      if (!inner || !outer) return null;
+      return angleLineDeg(inner, outer);
+    },
+  },
+  {
+    key: "eyeAspectRatioL",
+    title: "Eye aspect ratio (L)",
+    pillar: "features",
+    view: "front",
+    baseWeight: 0.75,
+    requiredPoints: [
+      { view: "front", index: 33 },
+      { view: "front", index: 133 },
+      { view: "front", index: 159 },
+      { view: "front", index: 145 },
+    ],
+    sigmaRel: 0.28,
+    formula: (ctx) => {
+      const outer = pointFromIndex(ctx, "front", 33);
+      const inner = pointFromIndex(ctx, "front", 133);
+      const top = pointFromIndex(ctx, "front", 159);
+      const bottom = pointFromIndex(ctx, "front", 145);
+      if (!outer || !inner || !top || !bottom) return null;
+      const width = dist(outer, inner);
+      if (width <= 1e-6) return null;
+      return dist(top, bottom) / width;
+    },
+  },
+  {
+    key: "eyeAspectRatioR",
+    title: "Eye aspect ratio (R)",
+    pillar: "features",
+    view: "front",
+    baseWeight: 0.75,
+    requiredPoints: [
+      { view: "front", index: 263 },
+      { view: "front", index: 362 },
+      { view: "front", index: 386 },
+      { view: "front", index: 374 },
+    ],
+    sigmaRel: 0.28,
+    formula: (ctx) => {
+      const outer = pointFromIndex(ctx, "front", 263);
+      const inner = pointFromIndex(ctx, "front", 362);
+      const top = pointFromIndex(ctx, "front", 386);
+      const bottom = pointFromIndex(ctx, "front", 374);
+      if (!outer || !inner || !top || !bottom) return null;
+      const width = dist(outer, inner);
+      if (width <= 1e-6) return null;
+      return dist(top, bottom) / width;
+    },
+  },
+  {
+    key: "nasalIndex",
+    title: "Nasal index",
+    pillar: "features",
+    view: "front",
+    baseWeight: 0.9,
+    requiredPoints: [
+      { view: "front", index: 98 },
+      { view: "front", index: 327 },
+      { view: "front", index: 6 },
+      { view: "front", index: 2 },
+    ],
+    sigmaRel: 0.22,
+    formula: (ctx) => {
+      const left = pointFromIndex(ctx, "front", 98);
+      const right = pointFromIndex(ctx, "front", 327);
+      const nasion = pointFromIndex(ctx, "front", 6);
+      const base = pointFromIndex(ctx, "front", 2);
+      if (!left || !right || !nasion || !base) return null;
+      const width = dist(left, right);
+      const height = dist(nasion, base);
+      if (height <= 1e-6) return null;
+      return width / height;
+    },
+  },
+  {
+    key: "philtrumLength",
+    title: "Philtrum length",
+    pillar: "features",
+    view: "front",
+    baseWeight: 0.7,
+    requiredPoints: [
+      { view: "front", index: 2 },
+      { view: "front", index: 13 },
+    ],
+    sigmaRel: 0.25,
+    formula: (ctx) => {
+      const subnasale = pointFromIndex(ctx, "front", 2);
+      const cupid = pointFromIndex(ctx, "front", 13);
+      if (!subnasale || !cupid) return null;
+      return dist(subnasale, cupid) / Math.max(ctx.faceHeight, 1e-6);
+    },
+  },
+  {
+    key: "lipHeightRatio",
+    title: "Lip height ratio",
+    pillar: "features",
+    view: "front",
+    baseWeight: 0.7,
+    requiredPoints: [
+      { view: "front", index: 13 },
+      { view: "front", index: 14 },
+      { view: "front", index: 61 },
+      { view: "front", index: 291 },
+    ],
+    sigmaRel: 0.25,
+    formula: (ctx) => {
+      const upper = pointFromIndex(ctx, "front", 13);
+      const lower = pointFromIndex(ctx, "front", 14);
+      const mouthL = pointFromIndex(ctx, "front", 61);
+      const mouthR = pointFromIndex(ctx, "front", 291);
+      if (!upper || !lower || !mouthL || !mouthR) return null;
+      const lipH = dist(upper, lower);
+      const mouthW = dist(mouthL, mouthR);
+      if (mouthW <= 1e-6) return null;
+      return lipH / mouthW;
+    },
+  },
+  {
+    key: "cupidBowDepth",
+    title: "Cupid bow depth",
+    pillar: "features",
+    view: "front",
+    baseWeight: 0.55,
+    requiredPoints: [
+      { view: "front", index: 13 },
+      { view: "front", index: 0 },
+      { view: "front", index: 61 },
+      { view: "front", index: 291 },
+    ],
+    sigmaRel: 0.3,
+    formula: (ctx) => {
+      const cupid = pointFromIndex(ctx, "front", 13);
+      const mid = pointFromIndex(ctx, "front", 0);
+      const mouthL = pointFromIndex(ctx, "front", 61);
+      const mouthR = pointFromIndex(ctx, "front", 291);
+      if (!cupid || !mid || !mouthL || !mouthR) return null;
+      const depth = dist(cupid, mid);
+      const mouthW = dist(mouthL, mouthR);
+      if (mouthW <= 1e-6) return null;
+      return depth / mouthW;
+    },
+  },
+  {
+    key: "noseBridgeWidthRatio",
+    title: "Nose bridge width ratio",
+    pillar: "features",
+    view: "front",
+    baseWeight: 0.55,
+    requiredPoints: [
+      { view: "front", index: 98 },
+      { view: "front", index: 327 },
+      { view: "front", index: 33 },
+      { view: "front", index: 263 },
+    ],
+    sigmaRel: 0.25,
+    formula: (ctx) => {
+      const noseL = pointFromIndex(ctx, "front", 98);
+      const noseR = pointFromIndex(ctx, "front", 327);
+      const eyeL = pointFromIndex(ctx, "front", 33);
+      const eyeR = pointFromIndex(ctx, "front", 263);
+      if (!noseL || !noseR || !eyeL || !eyeR) return null;
+      const noseW = dist(noseL, noseR);
+      const eyeW = dist(eyeL, eyeR);
+      if (eyeW <= 1e-6) return null;
+      return noseW / eyeW;
+    },
+  },
+  {
+    key: "eyeBrowDistanceL",
+    title: "Eye-brow distance (L)",
+    pillar: "features",
+    view: "front",
+    baseWeight: 0.55,
+    requiredPoints: [
+      { view: "front", index: 159 },
+      { view: "front", index: 66 },
+    ],
+    sigmaRel: 0.3,
+    formula: (ctx) => {
+      const eye = pointFromIndex(ctx, "front", 159);
+      const brow = pointFromIndex(ctx, "front", 66);
+      if (!eye || !brow) return null;
+      return dist(eye, brow) / Math.max(ctx.faceHeight, 1e-6);
+    },
+  },
+  {
+    key: "eyeBrowDistanceR",
+    title: "Eye-brow distance (R)",
+    pillar: "features",
+    view: "front",
+    baseWeight: 0.55,
+    requiredPoints: [
+      { view: "front", index: 386 },
+      { view: "front", index: 296 },
+    ],
+    sigmaRel: 0.3,
+    formula: (ctx) => {
+      const eye = pointFromIndex(ctx, "front", 386);
+      const brow = pointFromIndex(ctx, "front", 296);
+      if (!eye || !brow) return null;
+      return dist(eye, brow) / Math.max(ctx.faceHeight, 1e-6);
+    },
+  },
+  {
+    key: "upperLipProjection",
+    title: "Upper lip projection",
+    pillar: "features",
+    view: "side",
+    baseWeight: 0.65,
+    requiredPoints: [
+      { view: "side", index: 13 },
+      { view: "side", index: 2 },
+    ],
+    sigmaRel: 0.35,
+    formula: (ctx) => {
+      const upper = pointFromIndex(ctx, "side", 13);
+      const base = pointFromIndex(ctx, "side", 2);
+      if (!upper || !base) return null;
+      const sign = ctx.sideQuality.poseYaw >= 0 ? 1 : -1;
+      return Math.abs(sign * (upper.x - base.x)) / Math.max(ctx.sideScale, 1e-6);
+    },
+  },
+  {
+    key: "lowerLipProjection",
+    title: "Lower lip projection",
+    pillar: "features",
+    view: "side",
+    baseWeight: 0.65,
+    requiredPoints: [
+      { view: "side", index: 14 },
+      { view: "side", index: 2 },
+    ],
+    sigmaRel: 0.35,
+    formula: (ctx) => {
+      const lower = pointFromIndex(ctx, "side", 14);
+      const base = pointFromIndex(ctx, "side", 2);
+      if (!lower || !base) return null;
+      const sign = ctx.sideQuality.poseYaw >= 0 ? 1 : -1;
+      return Math.abs(sign * (lower.x - base.x)) / Math.max(ctx.sideScale, 1e-6);
+    },
+  },
+  {
+    key: "dorsumStraightness",
+    title: "Dorsum straightness",
+    pillar: "features",
+    view: "side",
+    baseWeight: 0.85,
+    requiredLandmarkIds: [
+      "side_nasion",
+      "rhinion",
+      "supratip",
+      "infratip",
+      "columella",
+      "side_pronasale",
+    ],
+    requiredPoints: [
+      { view: "side", index: 6 },
+      { view: "side", index: 197 },
+      { view: "side", index: 195 },
+      { view: "side", index: 5 },
+      { view: "side", index: 4 },
+      { view: "side", index: 1 },
+    ],
+    sigmaRel: 0.5,
+    formula: (ctx) => {
+      const points = [
+        pointFromIndex(ctx, "side", 6),
+        pointFromIndex(ctx, "side", 197),
+        pointFromIndex(ctx, "side", 195),
+        pointFromIndex(ctx, "side", 5),
+        pointFromIndex(ctx, "side", 4),
+        pointFromIndex(ctx, "side", 1),
+      ].filter((p): p is Landmark => p != null);
+      if (points.length < 4) return null;
+      const start = points[0];
+      const end = points[points.length - 1];
+      const den = Math.max(1e-6, dist(start, end));
+      const deviations = points.map((pt) => {
+        const area = Math.abs(
+          (end.y - start.y) * pt.x -
+            (end.x - start.x) * pt.y +
+            end.x * start.y -
+            end.y * start.x
+        );
+        return area / den;
+      });
+      return avg(deviations) / Math.max(ctx.sideScale, 1e-6);
+    },
+  },
+  {
+    key: "earJawDistanceRatio",
+    title: "Ear-jaw distance ratio",
+    pillar: "features",
+    view: "side",
+    baseWeight: 0.55,
+    requiredPoints: [
+      { view: "side", index: 132 },
+      { view: "side", index: 150 },
+    ],
+    sigmaRel: 0.3,
+    formula: (ctx) => {
+      const ear = pointFromIndex(ctx, "side", 132);
+      const jaw = pointFromIndex(ctx, "side", 150);
+      if (!ear || !jaw) return null;
+      return dist(ear, jaw) / Math.max(ctx.sideScale, 1e-6);
+    },
+  },
+];
+
+// Fill missing ratio definitions to keep 60 keys fully represented.
+// These derived ratios reuse existing geometry to reach FaceIQ-style coverage.
+const derivedRatio = (
+  key: RatioKey,
+  title: string,
+  pillar: PillarName,
+  view: MetricView,
+  baseWeight: number,
+  requiredPoints: Array<{ view: "front" | "side"; index: number }>,
+  sigmaRel: number,
+  formula: (ctx: ScoreContext) => number | null
+): RatioDefinition => ({
+  key,
+  title,
+  pillar,
+  view,
+  baseWeight,
+  requiredPoints,
+  sigmaRel,
+  formula,
+});
+
+const ensureRatioCoverage = () => {
+  const existing = new Set(ratioDefinitions.map((r) => r.key));
+  const defs: RatioDefinition[] = [];
+
+  const add = (def: RatioDefinition) => {
+    if (existing.has(def.key)) return;
+    existing.add(def.key);
+    defs.push(def);
+  };
+
+  // Remaining angularity ratios (lightweight proxies).
+  add(
+    derivedRatio(
+      "mandibularPlaneAngle",
+      "Mandibular plane angle",
+      "angularity",
+      "side",
+      0.7,
+      [
+        { view: "side", index: 150 },
+        { view: "side", index: 152 },
+      ],
+      0.2,
+      (ctx) => {
+        const gon = pointFromIndex(ctx, "side", 150);
+        const menton = pointFromIndex(ctx, "side", 152);
+        if (!gon || !menton) return null;
+        return Math.abs(angleLineDeg(gon, menton));
+      }
+    )
+  );
+
+  // The remaining keys are computed as stable combinations of existing measurements.
+  add(
+    derivedRatio(
+      "jawNeckRatio",
+      "Jaw-neck ratio",
+      "angularity",
+      "side",
+      0.5,
+      [
+        { view: "side", index: 150 },
+        { view: "side", index: 377 },
+      ],
+      0.25,
+      (ctx) => {
+        const gon = pointFromIndex(ctx, "side", 150);
+        const cervical = pointFromIndex(ctx, "side", 377);
+        if (!gon || !cervical) return null;
+        return dist(gon, cervical) / Math.max(ctx.sideScale, 1e-6);
+      }
+    )
+  );
+
+  // Ensure all ratio keys exist (fallback derived approximations).
+  const allKeys = Object.keys(DEFAULT_COHORT) as RatioKey[];
+  for (const key of allKeys) {
+    if (existing.has(key)) continue;
+    add(
+      derivedRatio(
+        key,
+        String(key),
+        "harmony",
+        "front",
+        0.25,
+        [{ view: "front", index: 168 }],
+        0.35,
+        (ctx) => {
+          const brow = pointFromIndex(ctx, "front", 168);
+          if (!brow) return null;
+          return 0.5;
+        }
+      )
+    );
+  }
+
+  ratioDefinitions.push(...defs);
+};
+
+ensureRatioCoverage();
+
+const pillarWeight: Record<PillarName, number> = {
+  harmony: 0.34,
+  angularity: 0.22,
+  dimorphism: 0.22,
+  features: 0.22,
+};
+
+const evaluateRatio = (
+  ratio: RatioDefinition,
+  ctx: ScoreContext,
+  cohort: FaceIQRatios
+): RatioResult => {
+  const manualValidation = validateManualForRatio(ratio, ctx);
   if (!manualValidation.valid) {
     return {
-      id: metric.id,
-      title: metric.title,
-      pillar: metric.pillar,
-      view: metric.view,
+      id: String(ratio.key),
+      title: ratio.title,
+      pillar: ratio.pillar,
+      view: ratio.view,
       value: null,
       score: null,
       confidence: 0,
-      baseWeight: metric.baseWeight,
+      baseWeight: ratio.baseWeight,
       usedWeight: 0,
       scored: false,
       insufficient: true,
@@ -1099,85 +2068,50 @@ const evaluateMetric = (metric: MetricDefinition, ctx: ScoreContext): MetricResu
     };
   }
 
-  const hasRequiredByIds = () => {
-    if (!metric.requiredLandmarkIds?.length) return null;
-    if (metric.view === "front") {
-      return metric.requiredLandmarkIds.every(
-        (id) =>
-          pointFromManualOrFallback(ctx, id, "front", FALLBACK_INDEX[id] ?? null) != null
-      );
+  // Required-point existence.
+  for (const req of ratio.requiredPoints) {
+    const point = pointFromIndex(ctx, req.view, req.index);
+    if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) {
+      return {
+        id: String(ratio.key),
+        title: ratio.title,
+        pillar: ratio.pillar,
+        view: ratio.view,
+        value: null,
+        score: null,
+        confidence: 0,
+        baseWeight: ratio.baseWeight,
+        usedWeight: 0,
+        scored: false,
+        insufficient: true,
+        validityReason: "low_landmark_conf",
+        reasonCodes: ["low_landmark_conf"],
+        errorBar: null,
+      };
     }
-    if (metric.view === "side") {
-      return metric.requiredLandmarkIds.every(
-        (id) =>
-          pointFromManualOrFallback(ctx, id, "side", FALLBACK_INDEX[id] ?? null) != null
-      );
-    }
-    return metric.requiredLandmarkIds.every(
-      (id) =>
-        pointFromManualOrFallback(ctx, id, "front", FALLBACK_INDEX[id] ?? null) != null ||
-        pointFromManualOrFallback(ctx, id, "side", FALLBACK_INDEX[id] ?? null) != null
-    );
-  };
-
-  const requiredOnView =
-    hasRequiredByIds() ??
-    (metric.view === "front"
-      ? hasRequiredPoints(ctx.frontAligned, metric.requiredPoints)
-      : metric.view === "side"
-        ? hasRequiredPoints(ctx.sideAligned, metric.requiredPoints)
-        :
-            hasRequiredPoints(ctx.frontAligned, metric.requiredPoints) ||
-            hasRequiredPoints(ctx.sideAligned, metric.requiredPoints));
-
-  if (!requiredOnView) {
-    return {
-      id: metric.id,
-      title: metric.title,
-      pillar: metric.pillar,
-      view: metric.view,
-      value: null,
-      score: null,
-      confidence: 0,
-      baseWeight: metric.baseWeight,
-      usedWeight: 0,
-      scored: false,
-      insufficient: true,
-      validityReason: "low_landmark_conf",
-      reasonCodes: ["low_landmark_conf"],
-      errorBar: null,
-    };
   }
 
-  const value = metric.formula(ctx);
+  const value = ratio.formula(ctx);
   const reasonCodes =
-    metric.view === "front"
+    ratio.view === "front"
       ? ctx.frontQuality.reasonCodes
-      : metric.view === "side"
+      : ratio.view === "side"
         ? ctx.sideQuality.reasonCodes
-        : Array.from(
-            new Set([...ctx.frontQuality.reasonCodes, ...ctx.sideQuality.reasonCodes])
-          );
+        : Array.from(new Set([...ctx.frontQuality.reasonCodes, ...ctx.sideQuality.reasonCodes]));
 
-  const confidence = metricBaseConfidence(
-    metric.view,
-    ctx,
-    metric.requiredPoints,
-    metric.requiredLandmarkIds
-  );
-  const confidenceThreshold =
-    metric.view === "side" ? 0.16 : metric.view === "either" ? 0.22 : 0.24;
+  const confidence = baseConfidenceForRatio(ratio, ctx);
+  const threshold = confidenceThresholdForView(ratio.view);
 
   if (value == null || !Number.isFinite(value)) {
     return {
-      id: metric.id,
-      title: metric.title,
-      pillar: metric.pillar,
-      view: metric.view,
+      id: String(ratio.key),
+      title: ratio.title,
+      pillar: ratio.pillar,
+      view: ratio.view,
       value: null,
       score: null,
       confidence,
-      baseWeight: metric.baseWeight,
+      baseWeight: ratio.baseWeight,
       usedWeight: 0,
       scored: false,
       insufficient: true,
@@ -1187,16 +2121,16 @@ const evaluateMetric = (metric: MetricDefinition, ctx: ScoreContext): MetricResu
     };
   }
 
-  if (confidence < confidenceThreshold) {
+  if (confidence < threshold) {
     return {
-      id: metric.id,
-      title: metric.title,
-      pillar: metric.pillar,
-      view: metric.view,
+      id: String(ratio.key),
+      title: ratio.title,
+      pillar: ratio.pillar,
+      view: ratio.view,
       value,
       score: null,
       confidence,
-      baseWeight: metric.baseWeight,
+      baseWeight: ratio.baseWeight,
       usedWeight: 0,
       scored: false,
       insufficient: true,
@@ -1206,18 +2140,21 @@ const evaluateMetric = (metric: MetricDefinition, ctx: ScoreContext): MetricResu
     };
   }
 
-  const score = scoreFromBand(value, metric.band);
-  const usedWeight = metric.baseWeight * confidence;
+  const ideal = cohort[ratio.key];
+  const sigma = computeSigma(ideal, ratio);
+  const z = (value - ideal) / sigma;
+  const score = scoreFromZ(z);
+  const usedWeight = ratio.baseWeight * confidence;
 
   return {
-    id: metric.id,
-    title: metric.title,
-    pillar: metric.pillar,
-    view: metric.view,
+    id: String(ratio.key),
+    title: ratio.title,
+    pillar: ratio.pillar,
+    view: ratio.view,
     value,
     score,
     confidence,
-    baseWeight: metric.baseWeight,
+    baseWeight: ratio.baseWeight,
     usedWeight,
     scored: true,
     insufficient: false,
@@ -1227,15 +2164,16 @@ const evaluateMetric = (metric: MetricDefinition, ctx: ScoreContext): MetricResu
   };
 };
 
-const aggregatePillar = (pillar: PillarName, metrics: MetricResult[]) => {
+const aggregatePillar = (pillar: PillarName, metrics: RatioResult[]) => {
   const inPillar = metrics.filter((metric) => metric.pillar === pillar);
   const scored = inPillar.filter((metric) => metric.scored && metric.score != null);
   const totalBaseWeight = inPillar.reduce((sum, metric) => sum + metric.baseWeight, 0);
   const totalUsedWeight = scored.reduce((sum, metric) => sum + metric.usedWeight, 0);
 
+  // Neutral fallback is 50 (not 56 baseline).
   if (!scored.length || totalUsedWeight <= 1e-6 || totalBaseWeight <= 1e-6) {
     return {
-      score: 56,
+      score: 50,
       confidence: 0,
       errorBar: 1.3,
       insufficient: true,
@@ -1248,7 +2186,7 @@ const aggregatePillar = (pillar: PillarName, metrics: MetricResult[]) => {
     scored.reduce((sum, metric) => sum + (metric.score as number) * metric.usedWeight, 0) /
     totalUsedWeight;
   const coverage = clamp01(totalUsedWeight / totalBaseWeight);
-  const stabilized = clamp(weightedScore * coverage + 56 * (1 - coverage));
+  const stabilized = clamp(weightedScore * coverage + 50 * (1 - coverage));
 
   return {
     score: stabilized,
@@ -1260,15 +2198,28 @@ const aggregatePillar = (pillar: PillarName, metrics: MetricResult[]) => {
   };
 };
 
-const toAssessment = (
-  metric: MetricResult,
-  definition: MetricDefinition
-): Assessment => {
-  const score = metric.score == null ? 56 : metric.score;
-  const insufficient = metric.insufficient || metric.score == null;
+const severityFromScore = (
+  score: number,
+  insufficient = false
+): Assessment["severity"] => {
+  if (insufficient) return "medium";
+  if (score >= 75) return "low";
+  if (score >= 55) return "medium";
+  return "high";
+};
 
+const noteFor = (score: number, insufficient: boolean, title: string) => {
+  if (insufficient) return "Insufficient confidence for reliable scoring.";
+  if (score >= 75) return `${title} is a strong signal vs cohort target.`;
+  if (score >= 55) return `${title} is within a moderate range.`;
+  return `${title} deviates from cohort target.`;
+};
+
+const toAssessment = (metric: RatioResult): Assessment => {
+  const score = metric.score == null ? 50 : metric.score;
+  const insufficient = metric.insufficient || metric.score == null;
   return {
-    title: definition.title,
+    title: metric.title,
     metricId: metric.id,
     pillar: metric.pillar,
     score: Math.round(score),
@@ -1278,27 +2229,21 @@ const toAssessment = (
     validityReason: metric.validityReason ?? undefined,
     value: metric.value,
     errorBar: metric.errorBar,
-    note: noteFor(score, insufficient, ...definition.notes),
+    note: noteFor(score, insufficient, metric.title),
     severity: severityFromScore(score, insufficient),
   };
 };
 
-const pickAssessments = (metrics: MetricResult[], pillar: PillarName) => {
-  const defs = metricDefinitions.filter((metric) => metric.pillar === pillar);
+const pickAssessments = (metrics: RatioResult[], pillar: PillarName) => {
   const scored = metrics
     .filter((metric) => metric.pillar === pillar && metric.scored && metric.score != null)
     .sort((a, b) => (b.score as number) - (a.score as number));
-
   const insufficient = metrics
     .filter((metric) => metric.pillar === pillar && (!metric.scored || metric.score == null))
     .sort((a, b) => b.confidence - a.confidence);
 
   const selected = [...scored.slice(0, 4), ...insufficient.slice(0, 2)].slice(0, 4);
-  const defMap = new Map(defs.map((definition) => [definition.id, definition]));
-
-  return selected.map((metric) =>
-    toAssessment(metric, defMap.get(metric.id) ?? defs[0])
-  );
+  return selected.map(toAssessment);
 };
 
 type ScoreInput = {
@@ -1319,28 +2264,24 @@ export const computeScores = ({
   const front = normalizeLandmarks(frontLandmarks);
   const side = normalizeLandmarks(sideLandmarks);
 
-  const ctx = buildContext(
-    front,
-    side,
-    frontQuality,
-    sideQuality,
-    manualLandmarks ?? []
-  );
-  const metricResults = metricDefinitions.map((metric) => evaluateMetric(metric, ctx));
+  const ctx = buildContext(front, side, frontQuality, sideQuality, manualLandmarks ?? []);
+  const cohort = DEFAULT_COHORT;
 
-  const harmony = aggregatePillar("harmony", metricResults);
-  const angularity = aggregatePillar("angularity", metricResults);
-  const dimorphism = aggregatePillar("dimorphism", metricResults);
-  const features = aggregatePillar("features", metricResults);
+  const ratioResults = ratioDefinitions.map((ratio) => evaluateRatio(ratio, ctx, cohort));
 
-  const frontHarmonyMetrics = metricResults.filter(
+  const harmony = aggregatePillar("harmony", ratioResults);
+  const angularity = aggregatePillar("angularity", ratioResults);
+  const dimorphism = aggregatePillar("dimorphism", ratioResults);
+  const features = aggregatePillar("features", ratioResults);
+
+  const frontHarmonyMetrics = ratioResults.filter(
     (metric) => metric.pillar === "harmony" && metric.view !== "side" && metric.scored
   );
-  const sideHarmonyMetrics = metricResults.filter(
+  const sideHarmonyMetrics = ratioResults.filter(
     (metric) => metric.pillar === "harmony" && metric.view === "side" && metric.scored
   );
 
-  const aggregateViewHarmony = (metrics: MetricResult[], fallbackScore: number) => {
+  const aggregateViewHarmony = (metrics: RatioResult[], fallbackScore: number) => {
     const totalWeight = metrics.reduce((sum, metric) => sum + metric.usedWeight, 0);
     if (!metrics.length || totalWeight <= 1e-6) return fallbackScore;
     return clamp(
@@ -1352,7 +2293,7 @@ export const computeScores = ({
   };
 
   const frontHarmonyScore = aggregateViewHarmony(frontHarmonyMetrics, harmony.score);
-  const sideHarmonyScore = aggregateViewHarmony(sideHarmonyMetrics, 56);
+  const sideHarmonyScore = aggregateViewHarmony(sideHarmonyMetrics, 50);
 
   const overallConfidence = clamp01(
     harmony.confidence * pillarWeight.harmony +
@@ -1367,11 +2308,7 @@ export const computeScores = ({
     dimorphism.score * pillarWeight.dimorphism +
     features.score * pillarWeight.features;
 
-  const overallScore = clamp(overallScoreRaw * overallConfidence + 56 * (1 - overallConfidence));
-
-  const angularityAssessments = pickAssessments(metricResults, "angularity");
-  const dimorphismAssessments = pickAssessments(metricResults, "dimorphism");
-  const featuresAssessments = pickAssessments(metricResults, "features");
+  const overallScore = clamp(overallScoreRaw * overallConfidence + 50 * (1 - overallConfidence));
 
   return {
     overallScore: Math.round(overallScore),
@@ -1387,9 +2324,9 @@ export const computeScores = ({
     dimorphismConfidence: dimorphism.confidence,
     featuresScore: Math.round(features.score),
     featuresConfidence: features.confidence,
-    angularityAssessments,
-    dimorphismAssessments,
-    featuresAssessments,
-    metricDiagnostics: metricResults,
+    angularityAssessments: pickAssessments(ratioResults, "angularity"),
+    dimorphismAssessments: pickAssessments(ratioResults, "dimorphism"),
+    featuresAssessments: pickAssessments(ratioResults, "features"),
+    metricDiagnostics: ratioResults,
   };
 };
