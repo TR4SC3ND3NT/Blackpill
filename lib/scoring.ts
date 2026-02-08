@@ -85,6 +85,7 @@ export type FaceIQRatios = {
 type RatioKey = keyof FaceIQRatios;
 
 type RatioDefinition = {
+  id?: string;
   key: RatioKey;
   title: string;
   pillar: PillarName;
@@ -430,6 +431,8 @@ const baseConfidenceForRatio = (ratio: RatioDefinition, ctx: ScoreContext) => {
 const confidenceThresholdForView = (view: MetricView) =>
   view === "side" ? 0.16 : view === "either" ? 0.22 : 0.24;
 
+const ratioId = (ratio: RatioDefinition) => ratio.id ?? String(ratio.key);
+
 const computeSigma = (ideal: number, ratio: RatioDefinition) => {
   if (ratio.sigmaAbs != null) return Math.max(1e-6, ratio.sigmaAbs);
   const rel = ratio.sigmaRel ?? 0.12;
@@ -569,6 +572,7 @@ const ratioDefinitions: RatioDefinition[] = [
   },
   {
     key: "symmetryError",
+    id: "harmony_symmetry",
     title: "Symmetry error",
     pillar: "harmony",
     view: "front",
@@ -1991,7 +1995,7 @@ const evaluateRatio = (
   const manualValidation = validateManualForRatio(ratio, ctx);
   if (!manualValidation.valid) {
     return {
-      id: String(ratio.key),
+      id: ratioId(ratio),
       title: ratio.title,
       pillar: ratio.pillar,
       view: ratio.view,
@@ -2013,7 +2017,7 @@ const evaluateRatio = (
     const point = pointFromIndex(ctx, req.view, req.index);
     if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) {
       return {
-        id: String(ratio.key),
+        id: ratioId(ratio),
         title: ratio.title,
         pillar: ratio.pillar,
         view: ratio.view,
@@ -2044,7 +2048,7 @@ const evaluateRatio = (
 
   if (value == null || !Number.isFinite(value)) {
     return {
-      id: String(ratio.key),
+      id: ratioId(ratio),
       title: ratio.title,
       pillar: ratio.pillar,
       view: ratio.view,
@@ -2063,7 +2067,7 @@ const evaluateRatio = (
 
   if (confidence < threshold) {
     return {
-      id: String(ratio.key),
+      id: ratioId(ratio),
       title: ratio.title,
       pillar: ratio.pillar,
       view: ratio.view,
@@ -2087,7 +2091,7 @@ const evaluateRatio = (
   const usedWeight = ratio.baseWeight * confidence;
 
   return {
-    id: String(ratio.key),
+    id: ratioId(ratio),
     title: ratio.title,
     pillar: ratio.pillar,
     view: ratio.view,
