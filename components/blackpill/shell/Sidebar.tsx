@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import { Avatar } from "@/components/blackpill/Avatar";
+import { formatAgoShort, loadSnapshots, subscribeSnapshots } from "@/lib/analysisHistory";
 import { mockDashboard } from "@/lib/mock/dashboard";
+import { useEffect, useMemo, useState } from "react";
 
 export type SidebarProps = {
   open: boolean;
@@ -11,7 +13,27 @@ export type SidebarProps = {
 };
 
 export function Sidebar({ open, selectedId, onNavigate }: SidebarProps) {
-  const { user, history } = mockDashboard;
+  const { user } = mockDashboard;
+  const [snapshots, setSnapshots] = useState(() => loadSnapshots());
+
+  useEffect(() => {
+    return subscribeSnapshots(() => setSnapshots(loadSnapshots()));
+  }, []);
+
+  const history = useMemo(() => {
+    if (!snapshots.length) return mockDashboard.history;
+    const now = new Date(snapshots[0]?.createdAtIso ?? 0).getTime();
+    return snapshots.map((s) => ({
+      id: s.id,
+      createdAtLabel: formatAgoShort(s.createdAtIso, now),
+      overall: Math.round(s.overall),
+      harmony: Number((s.pillarScores.harmony / 10).toFixed(1)),
+      angularity: Number((s.pillarScores.angularity / 10).toFixed(1)),
+      dimorphism: Number((s.pillarScores.dimorphism / 10).toFixed(1)),
+      features: Number((s.pillarScores.features / 10).toFixed(1)),
+      thumbnailUrl: null,
+    }));
+  }, [snapshots]);
 
   return (
     <aside

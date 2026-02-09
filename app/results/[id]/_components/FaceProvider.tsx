@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 import { fetchJson } from "@/lib/api";
+import { saveSnapshotFromFace } from "@/lib/analysisHistory";
 import type { FaceRecord } from "@/lib/types";
 
 export type ImageSize = {
@@ -134,6 +135,11 @@ export function FaceProvider({
       .then((res) => {
         if (!active) return;
         setFace(res.face);
+        try {
+          saveSnapshotFromFace(res.face);
+        } catch {
+          // Ignore snapshot persistence failures (quota, private mode, etc).
+        }
         setError(null);
       })
       .catch(() => {

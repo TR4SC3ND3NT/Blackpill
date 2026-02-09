@@ -1,6 +1,11 @@
+"use client";
+
 import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/blackpill/Badge";
 import { Card } from "@/components/blackpill/Card";
+import type { AnalysisSnapshot } from "@/lib/analysisHistory";
+import { formatAgoShort, loadSnapshots, subscribeSnapshots } from "@/lib/analysisHistory";
 import { cn } from "@/lib/cn";
 import { getMockAnalysisDetails, mockDashboard } from "@/lib/mock/dashboard";
 
@@ -9,9 +14,99 @@ export type DashboardContentProps = {
 };
 
 export function DashboardContent({ selectedId }: DashboardContentProps) {
-  const { history, kpis, series } = mockDashboard;
+  const [snapshots, setSnapshots] = useState<AnalysisSnapshot[]>(() => loadSnapshots());
+
+  useEffect(() => {
+    return subscribeSnapshots(() => setSnapshots(loadSnapshots()));
+  }, []);
+
+  const { history, kpis, series, selected, cohortLabel } = useMemo(() => {
+    if (!snapshots.length) {
+      const latest = mockDashboard.history[0] ?? null;
+      const selectedMock = selectedId ? getMockAnalysisDetails(selectedId) : null;
+      return {
+        history: mockDashboard.history,
+        kpis: mockDashboard.kpis,
+        series: mockDashboard.series,
+        selected: selectedMock,
+        cohortLabel: "asian_male_young",
+        latest,
+      };
+    }
+
+    const baselineNow = new Date(snapshots[0]?.createdAtIso ?? 0).getTime();
+    const historyFromSnapshots = snapshots.map((s) => ({
+      id: s.id,
+      createdAtLabel: formatAgoShort(s.createdAtIso, baselineNow),
+      overall: Math.round(s.overall),
+      harmony: Number((s.pillarScores.harmony / 10).toFixed(1)),
+      angularity: Number((s.pillarScores.angularity / 10).toFixed(1)),
+      dimorphism: Number((s.pillarScores.dimorphism / 10).toFixed(1)),
+      features: Number((s.pillarScores.features / 10).toFixed(1)),
+      thumbnailUrl: null,
+    }));
+
+    const dayMs = 24 * 60 * 60 * 1000;
+    const inLastDays = (iso: string, days: number) =>
+      new Date(iso).getTime() >= baselineNow - days * dayMs;
+
+    const overalls = snapshots.map((s) => s.overall).filter((n) => Number.isFinite(n));
+    const overallAvg = Math.round(overalls.reduce((acc, v) => acc + v, 0) / Math.max(1, overalls.length));
+    const bestOverall = Math.round(overalls.reduce((m, v) => Math.max(m, v), 0));
+
+    const last7 = snapshots.filter((s) => inLastDays(s.createdAtIso, 7));
+    const prev7 = snapshots.filter((s) => !inLastDays(s.createdAtIso, 7) && inLastDays(s.createdAtIso, 14));
+    const avg = (arr: AnalysisSnapshot[]) =>
+      arr.length ? arr.reduce((acc, s) => acc + s.overall, 0) / arr.length : null;
+    const overallAvgDelta =
+      last7.length && prev7.length ? Math.round((avg(last7) ?? 0) - (avg(prev7) ?? 0)) : undefined;
+
+    const kpisFromSnapshots = {
+      overallAvg,
+      overallAvgDelta,
+      bestOverall,
+      analysesCount: snapshots.length,
+      last7Days: last7.length,
+    };
+
+    const seriesFromSnapshots = {
+      overall: snapshots
+        .slice()
+        .sort((a, b) => (a.createdAtIso || "").localeCompare(b.createdAtIso || ""))
+        .slice(-30)
+        .map((s) => ({ t: s.createdAtIso, overall: Math.round(s.overall) })),
+    };
+
+    const selectedSnapshot = selectedId ? snapshots.find((s) => s.id === selectedId) ?? null : null;
+    const selectedFromSnapshots = selectedSnapshot
+      ? {
+          id: selectedSnapshot.id,
+          name: `Analysis ${selectedSnapshot.id}`,
+          createdAtIso: selectedSnapshot.createdAtIso,
+          createdAtLabel: formatAgoShort(selectedSnapshot.createdAtIso, baselineNow),
+          overall: Math.round(selectedSnapshot.overall),
+          pillars: {
+            harmony: Number((selectedSnapshot.pillarScores.harmony / 10).toFixed(1)),
+            angularity: Number((selectedSnapshot.pillarScores.angularity / 10).toFixed(1)),
+            dimorphism: Number((selectedSnapshot.pillarScores.dimorphism / 10).toFixed(1)),
+            features: Number((selectedSnapshot.pillarScores.features / 10).toFixed(1)),
+          },
+          notes: `Cohort: ${selectedSnapshot.cohortKey}. Snapshot stored locally (UI-only).`,
+        }
+      : null;
+
+    const cohortLabel = selectedSnapshot?.cohortKey ?? snapshots[0]?.cohortKey ?? "—";
+
+    return {
+      history: historyFromSnapshots,
+      kpis: kpisFromSnapshots,
+      series: seriesFromSnapshots,
+      selected: selectedFromSnapshots,
+      cohortLabel,
+    };
+  }, [selectedId, snapshots]);
+
   const latest = history[0] ?? null;
-  const selected = selectedId ? getMockAnalysisDetails(selectedId) : null;
 
   return (
     <div className="max-w-7xl mx-auto px-6 py-6 sm:py-8">
@@ -201,7 +296,7 @@ export function DashboardContent({ selectedId }: DashboardContentProps) {
               </div>
 
               <div className="mt-5 space-y-3">
-                <LineItem label="Cohort" value="asian_male_young" />
+                <LineItem label="Cohort" value={cohortLabel} />
                 <LineItem label="Plan" value={mockDashboard.user.planLabel} />
                 <LineItem label="Retention" value="Enabled" />
               </div>
@@ -345,4 +440,3 @@ function LineItem({ label, value }: { label: string; value: string }) {
     </div>
   );
 }
-
