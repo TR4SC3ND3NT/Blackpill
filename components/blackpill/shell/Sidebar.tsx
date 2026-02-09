@@ -29,7 +29,7 @@ export function Sidebar({ open, selectedId, onNavigate }: SidebarProps) {
       angularity: Number((s.pillarScores.angularity / 10).toFixed(1)),
       dimorphism: Number((s.pillarScores.dimorphism / 10).toFixed(1)),
       features: Number((s.pillarScores.features / 10).toFixed(1)),
-      thumbnailUrl: null,
+      thumbnailUrl: s.frontPhotoUrl ?? null,
     }));
   }, [snapshots]);
 

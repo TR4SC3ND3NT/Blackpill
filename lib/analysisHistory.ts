@@ -22,6 +22,10 @@ export type AnalysisSnapshot = {
     features: number;
   };
 
+  // Optional source images (URLs only; avoid base64 to keep storage small).
+  frontPhotoUrl?: string | null;
+  sidePhotoUrl?: string | null;
+
   // Optional diagnostic payload for richer analytics / exports.
   metrics?: AnalysisSnapshotMetric[];
 };
@@ -89,6 +93,8 @@ const normalizeSnapshot = (value: unknown): AnalysisSnapshot | null => {
       dimorphism,
       features,
     },
+    frontPhotoUrl: typeof v.frontPhotoUrl === "string" ? v.frontPhotoUrl : null,
+    sidePhotoUrl: typeof v.sidePhotoUrl === "string" ? v.sidePhotoUrl : null,
     metrics: Array.isArray(v.metrics) ? (v.metrics as AnalysisSnapshotMetric[]) : undefined,
   };
 };
@@ -177,6 +183,8 @@ export function saveSnapshotFromFace(face: FaceRecord): void {
       dimorphism: face.dimorphismScore,
       features: face.featuresScore,
     },
+    frontPhotoUrl: face.frontPhotoUrl ?? null,
+    sidePhotoUrl: face.sidePhotoUrl ?? null,
     metrics,
   });
 }
