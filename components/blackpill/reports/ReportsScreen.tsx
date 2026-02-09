@@ -8,10 +8,11 @@ import type { AnalysisSnapshot } from "@/lib/analysisHistory";
 import { formatAgoShort, loadSnapshots, subscribeSnapshots } from "@/lib/analysisHistory";
 import type { ReportExport, ReportExportStatus } from "@/lib/reportHistory";
 import { addReportExport, loadReportExports, subscribeReportExports } from "@/lib/reportHistory";
+import { buildSnapshotReportPayload, snapshotMetricsToCsv } from "@/lib/snapshotExport";
 import { cn } from "@/lib/cn";
 
-const downloadJson = (fileName: string, payload: unknown) => {
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+const downloadText = (fileName: string, contents: string, type: string) => {
+  const blob = new Blob([contents], { type });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -21,6 +22,28 @@ const downloadJson = (fileName: string, payload: unknown) => {
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+};
+
+const copyToClipboard = async (text: string): Promise<boolean> => {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    try {
+      const el = document.createElement("textarea");
+      el.value = text;
+      el.setAttribute("readonly", "");
+      el.style.position = "fixed";
+      el.style.top = "-9999px";
+      document.body.appendChild(el);
+      el.select();
+      const ok = document.execCommand("copy");
+      el.remove();
+      return ok;
+    } catch {
+      return false;
+    }
+  }
 };
 
 const badgeVariant = (status: ReportExportStatus): "neutral" | "success" | "danger" => {
@@ -41,6 +64,7 @@ export function ReportsScreen() {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<ReportExportStatus | "">("");
   const [selectedAnalysisId, setSelectedAnalysisId] = useState<string>("");
+  const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
 
   useEffect(() => {
     return subscribeSnapshots(() => setSnapshots(loadSnapshots()));
@@ -66,33 +90,53 @@ export function ReportsScreen() {
       return (
         r.id.toLowerCase().includes(q) ||
         r.analysisId.toLowerCase().includes(q) ||
+        r.fileName.toLowerCase().includes(q) ||
         (r.cohortKey ?? "").toLowerCase().includes(q)
       );
     });
   }, [query, reports, status]);
 
-  const exportSnapshot = (analysisId: string) => {
+  type ExportFormat = "json" | "csv";
+
+  const exportSnapshot = (analysisId: string, format: ExportFormat, track = true) => {
     const snap = snapshots.find((s) => s.id === analysisId) ?? null;
     if (!snap) return;
 
     const exportedAtIso = new Date().toISOString();
-    const fileName = `blackpill-report-${analysisId}.json`;
+    const fileName =
+      format === "csv"
+        ? `blackpill-metrics-${analysisId}.csv`
+        : `blackpill-report-${analysisId}.json`;
 
-    downloadJson(fileName, {
-      kind: "blackpill-report-v1",
-      exportedAtIso,
-      snapshot: snap,
-    });
+    if (format === "csv") {
+      const csv = snapshotMetricsToCsv(snap);
+      downloadText(fileName, csv, "text/csv");
+    } else {
+      const payload = buildSnapshotReportPayload(snap, exportedAtIso);
+      downloadText(fileName, JSON.stringify(payload, null, 2), "application/json");
+    }
 
-    addReportExport({
-      id: `rpt_${analysisId}_${exportedAtIso}`,
-      createdAtIso: exportedAtIso,
-      analysisId,
-      cohortKey: snap.cohortKey ?? null,
-      overall: Math.round(snap.overall),
-      status: "Complete",
-      fileName,
-    });
+    if (track) {
+      addReportExport({
+        id: `rpt_${format}_${analysisId}_${exportedAtIso}`,
+        createdAtIso: exportedAtIso,
+        analysisId,
+        cohortKey: snap.cohortKey ?? null,
+        overall: Math.round(snap.overall),
+        status: "Complete",
+        fileName,
+      });
+    }
+  };
+
+  const onCopyJson = async (analysisId: string) => {
+    const snap = snapshots.find((s) => s.id === analysisId) ?? null;
+    if (!snap) return;
+
+    const payload = buildSnapshotReportPayload(snap, new Date().toISOString());
+    const ok = await copyToClipboard(JSON.stringify(payload, null, 2));
+    setCopyStatus(ok ? "copied" : "failed");
+    window.setTimeout(() => setCopyStatus("idle"), 1600);
   };
 
   return (
@@ -100,37 +144,102 @@ export function ReportsScreen() {
       title="Reports"
       subtitle="Exports and history"
       rightSlot={
-        <button
-          type="button"
-          disabled={!canExport}
-          onClick={() => exportSnapshot(effectiveSelectedId)}
-          className={cn(
-            "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors border",
-            canExport
-              ? "text-gray-600 hover:text-gray-900 hover:bg-gray-100 border-gray-200"
-              : "text-gray-400 border-gray-200 bg-gray-50 cursor-not-allowed",
-          )}
-          title={canExport ? "Export latest analysis snapshot" : "Run an analysis to enable exports"}
-        >
-          Export
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="24"
-            height="24"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="lucide lucide-download h-4 w-4"
-            aria-hidden="true"
+        <>
+          <button
+            type="button"
+            disabled={!canExport}
+            onClick={() => onCopyJson(effectiveSelectedId)}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors border",
+              canExport
+                ? "text-gray-600 hover:text-gray-900 hover:bg-gray-100 border-gray-200"
+                : "text-gray-400 border-gray-200 bg-gray-50 cursor-not-allowed",
+            )}
+            title={canExport ? "Copy JSON to clipboard" : "Run an analysis to enable exports"}
           >
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-            <path d="M7 10l5 5 5-5" />
-            <path d="M12 15V3" />
-          </svg>
-        </button>
+            {copyStatus === "copied" ? "Copied" : copyStatus === "failed" ? "Copy failed" : "Copy JSON"}
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="24"
+              height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="lucide lucide-copy h-4 w-4"
+              aria-hidden="true"
+            >
+              <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
+              <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+            </svg>
+          </button>
+
+          <button
+            type="button"
+            disabled={!canExport}
+            onClick={() => exportSnapshot(effectiveSelectedId, "json")}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors border",
+              canExport
+                ? "text-gray-600 hover:text-gray-900 hover:bg-gray-100 border-gray-200"
+                : "text-gray-400 border-gray-200 bg-gray-50 cursor-not-allowed",
+            )}
+            title={canExport ? "Export JSON report" : "Run an analysis to enable exports"}
+          >
+            Export JSON
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="24"
+              height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="lucide lucide-download h-4 w-4"
+              aria-hidden="true"
+            >
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <path d="M7 10l5 5 5-5" />
+              <path d="M12 15V3" />
+            </svg>
+          </button>
+
+          <button
+            type="button"
+            disabled={!canExport}
+            onClick={() => exportSnapshot(effectiveSelectedId, "csv")}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors border",
+              canExport
+                ? "text-gray-600 hover:text-gray-900 hover:bg-gray-100 border-gray-200"
+                : "text-gray-400 border-gray-200 bg-gray-50 cursor-not-allowed",
+            )}
+            title={canExport ? "Export CSV metrics" : "Run an analysis to enable exports"}
+          >
+            Export CSV
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="24"
+              height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="lucide lucide-download h-4 w-4"
+              aria-hidden="true"
+            >
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <path d="M7 10l5 5 5-5" />
+              <path d="M12 15V3" />
+            </svg>
+          </button>
+        </>
       }
     >
       <div className="max-w-7xl mx-auto px-6 py-[var(--bp-content-py)] sm:py-[var(--bp-content-py-sm)]">
@@ -210,11 +319,14 @@ export function ReportsScreen() {
                   {visibleReports.length ? (
                     visibleReports.map((row) => {
                       const canDownload = Boolean(snapshots.find((s) => s.id === row.analysisId));
+                      const format: ExportFormat = row.fileName.toLowerCase().endsWith(".csv") ? "csv" : "json";
                       return (
                         <tr key={row.id} className="hover:bg-gray-50 transition-colors">
                           <td className="px-4 sm:px-6 py-4">
                             <div className="text-sm font-medium text-gray-900">{row.fileName}</div>
-                            <div className="mt-1 text-xs text-gray-500">JSON export</div>
+                            <div className="mt-1 text-xs text-gray-500">
+                              {format === "csv" ? "CSV metrics export" : "JSON report export"}
+                            </div>
                           </td>
                           <td className="px-4 sm:px-6 py-4 text-sm text-gray-600">
                             {formatAgoShort(row.createdAtIso, baselineNow)} ago
@@ -235,7 +347,7 @@ export function ReportsScreen() {
                             <button
                               type="button"
                               disabled={!canDownload}
-                              onClick={() => exportSnapshot(row.analysisId)}
+                              onClick={() => exportSnapshot(row.analysisId, format, false)}
                               className={cn(
                                 "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors border",
                                 canDownload
@@ -284,7 +396,7 @@ export function ReportsScreen() {
               <div className="min-w-0">
                 <div className="text-sm font-medium text-gray-900">Export notes</div>
                 <div className="mt-1 text-xs text-gray-500">
-                  Exports are generated client-side from locally stored analysis snapshots.
+                  Exports are generated client-side from locally stored analysis snapshots (JSON report or CSV metrics).
                 </div>
               </div>
               <Badge className="bg-gray-50 text-gray-600">Local</Badge>
