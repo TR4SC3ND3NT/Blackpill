@@ -27,11 +27,14 @@ const rangeLabel = (range: AnalyticsTimeRange) => {
 };
 
 export function AnalyticsScreen() {
-  const [snapshots, setSnapshots] = useState<AnalysisSnapshot[]>(() => loadSnapshots());
+  const [snapshots, setSnapshots] = useState<AnalysisSnapshot[]>([]);
   const [timeRange, setTimeRange] = useState<AnalyticsTimeRange>("30d");
 
   useEffect(() => {
-    return subscribeSnapshots(() => setSnapshots(loadSnapshots()));
+    const unsubscribe = subscribeSnapshots(() => setSnapshots(loadSnapshots()));
+    // Avoid hydration mismatch: load localStorage only after mount (async).
+    queueMicrotask(() => setSnapshots(loadSnapshots()));
+    return unsubscribe;
   }, []);
 
   const analytics = useMemo(

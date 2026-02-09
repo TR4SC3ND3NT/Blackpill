@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Avatar } from "@/components/blackpill/Avatar";
 import { useEffect, useMemo, useState } from "react";
+import type { AnalysisSnapshot } from "@/lib/analysisHistory";
 import { clearSnapshots, deleteSnapshot, formatAgoShort, loadSnapshots, subscribeSnapshots } from "@/lib/analysisHistory";
 
 export type SidebarProps = {
@@ -12,10 +13,13 @@ export type SidebarProps = {
 };
 
 export function Sidebar({ open, selectedId, onNavigate }: SidebarProps) {
-  const [snapshots, setSnapshots] = useState(() => loadSnapshots());
+  const [snapshots, setSnapshots] = useState<AnalysisSnapshot[]>([]);
 
   useEffect(() => {
-    return subscribeSnapshots(() => setSnapshots(loadSnapshots()));
+    const unsubscribe = subscribeSnapshots(() => setSnapshots(loadSnapshots()));
+    // Avoid hydration mismatch: load localStorage only after mount (async).
+    queueMicrotask(() => setSnapshots(loadSnapshots()));
+    return unsubscribe;
   }, []);
 
   const history = useMemo(() => {

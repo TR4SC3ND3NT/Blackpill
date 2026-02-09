@@ -15,22 +15,24 @@ export function SettingsContent() {
   const sectionIds = useMemo(() => sections.map((s) => s.id), [sections]);
   const [active, setActive] = useState<SettingsSectionId>(sectionIds[0] ?? "general");
   const [values, setValues] = useState<SettingsValues>(() => {
-    const stored = loadUiSettings();
     const next: SettingsValues = {};
     for (const section of sections) {
       for (const item of section.items) {
-        const storedValue = (stored as unknown as Record<string, SettingValue>)[item.id];
-        next[item.id] = typeof storedValue !== "undefined" ? storedValue : item.value;
+        next[item.id] = item.value;
       }
     }
     return next;
   });
 
   useEffect(() => {
-    return subscribeUiSettings(() => {
+    const applyStored = () => {
       const stored = loadUiSettings();
       setValues((prev) => ({ ...prev, ...stored }));
-    });
+    };
+    const unsubscribe = subscribeUiSettings(applyStored);
+    // Avoid hydration mismatch: load localStorage only after mount (async).
+    queueMicrotask(applyStored);
+    return unsubscribe;
   }, []);
 
   const activeSection = sections.find((s) => s.id === active) ?? sections[0];

@@ -19,15 +19,21 @@ const tabs: Array<{ id: ProfileTabId; label: string }> = [
 
 export function ProfileContent() {
   const [active, setActive] = useState<ProfileTabId>("account");
-  const [snapshots, setSnapshots] = useState<AnalysisSnapshot[]>(() => loadSnapshots());
-  const [exports, setExports] = useState<ReportExport[]>(() => loadReportExports());
+  const [snapshots, setSnapshots] = useState<AnalysisSnapshot[]>([]);
+  const [exports, setExports] = useState<ReportExport[]>([]);
 
   useEffect(() => {
-    return subscribeSnapshots(() => setSnapshots(loadSnapshots()));
+    const unsubscribe = subscribeSnapshots(() => setSnapshots(loadSnapshots()));
+    // Avoid hydration mismatch: load localStorage only after mount (async).
+    queueMicrotask(() => setSnapshots(loadSnapshots()));
+    return unsubscribe;
   }, []);
 
   useEffect(() => {
-    return subscribeReportExports(() => setExports(loadReportExports()));
+    const unsubscribe = subscribeReportExports(() => setExports(loadReportExports()));
+    // Avoid hydration mismatch: load localStorage only after mount (async).
+    queueMicrotask(() => setExports(loadReportExports()));
+    return unsubscribe;
   }, []);
 
   const derived = useMemo(() => {

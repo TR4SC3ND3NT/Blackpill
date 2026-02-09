@@ -59,19 +59,25 @@ const badgeVariant = (status: ReportExportStatus): "neutral" | "success" | "dang
 };
 
 export function ReportsScreen() {
-  const [snapshots, setSnapshots] = useState<AnalysisSnapshot[]>(() => loadSnapshots());
-  const [reports, setReports] = useState<ReportExport[]>(() => loadReportExports());
+  const [snapshots, setSnapshots] = useState<AnalysisSnapshot[]>([]);
+  const [reports, setReports] = useState<ReportExport[]>([]);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<ReportExportStatus | "">("");
   const [selectedAnalysisId, setSelectedAnalysisId] = useState<string>("");
   const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
 
   useEffect(() => {
-    return subscribeSnapshots(() => setSnapshots(loadSnapshots()));
+    const unsubscribe = subscribeSnapshots(() => setSnapshots(loadSnapshots()));
+    // Avoid hydration mismatch: load localStorage only after mount (async).
+    queueMicrotask(() => setSnapshots(loadSnapshots()));
+    return unsubscribe;
   }, []);
 
   useEffect(() => {
-    return subscribeReportExports(() => setReports(loadReportExports()));
+    const unsubscribe = subscribeReportExports(() => setReports(loadReportExports()));
+    // Avoid hydration mismatch: load localStorage only after mount (async).
+    queueMicrotask(() => setReports(loadReportExports()));
+    return unsubscribe;
   }, []);
 
   const effectiveSelectedId = selectedAnalysisId || snapshots[0]?.id || "";

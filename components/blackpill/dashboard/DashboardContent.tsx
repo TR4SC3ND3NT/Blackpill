@@ -13,10 +13,13 @@ export type DashboardContentProps = {
 };
 
 export function DashboardContent({ selectedId }: DashboardContentProps) {
-  const [snapshots, setSnapshots] = useState<AnalysisSnapshot[]>(() => loadSnapshots());
+  const [snapshots, setSnapshots] = useState<AnalysisSnapshot[]>([]);
 
   useEffect(() => {
-    return subscribeSnapshots(() => setSnapshots(loadSnapshots()));
+    const unsubscribe = subscribeSnapshots(() => setSnapshots(loadSnapshots()));
+    // Avoid hydration mismatch: load localStorage only after mount (async).
+    queueMicrotask(() => setSnapshots(loadSnapshots()));
+    return unsubscribe;
   }, []);
 
   const effectiveSelectedId = useMemo(() => {
