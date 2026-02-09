@@ -1,13 +1,16 @@
 "use client";
 
+import Link from "next/link";
 import { Avatar } from "@/components/blackpill/Avatar";
 import { mockDashboard } from "@/lib/mock/dashboard";
 
 export type SidebarProps = {
   open: boolean;
+  selectedId?: string;
+  onNavigate?: () => void;
 };
 
-export function Sidebar({ open }: SidebarProps) {
+export function Sidebar({ open, selectedId, onNavigate }: SidebarProps) {
   const { user, history } = mockDashboard;
 
   return (
@@ -106,7 +109,11 @@ export function Sidebar({ open }: SidebarProps) {
         <div className="px-3 pt-1 pb-3 flex items-center justify-between flex-shrink-0 gap-2">
           <h2 className="text-xs font-medium text-gray-500 uppercase tracking-wider">History</h2>
           <div className="flex items-center gap-2">
-            <button className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-200 transition-colors border border-gray-300">
+            <Link
+              href="/"
+              onClick={onNavigate}
+              className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-200 transition-colors border border-gray-300"
+            >
               New
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -124,25 +131,35 @@ export function Sidebar({ open }: SidebarProps) {
                 <path d="M5 12h14"></path>
                 <path d="M12 5v14"></path>
               </svg>
-            </button>
+            </Link>
           </div>
         </div>
 
         <div className="flex-1 overflow-y-auto px-3 py-2">
           <div className="space-y-1">
-            {history.map((item, idx) => (
-              <button
-                key={item.id}
-                type="button"
-                className="group relative w-full flex items-center gap-2 min-[375px]:gap-3 px-2 min-[375px]:px-3 py-2 min-[375px]:py-2.5 rounded-lg border transition-all border-transparent text-gray-600 hover:bg-white/80 hover:border-gray-200/50 hover:text-gray-900"
-              >
-                <div
-                  className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-9 rounded-r-full transition-all"
-                  style={{
-                    background: idx === 0 ? "rgb(17 24 39)" : "rgb(209 213 219)",
-                    opacity: idx === 0 ? 0.9 : 0.6,
-                  }}
-                />
+            {history.map((item, idx) => {
+              const isActive = selectedId ? item.id === selectedId : idx === 0;
+
+              return (
+                <Link
+                  key={item.id}
+                  href={`/ui/dashboard/${item.id}`}
+                  onClick={onNavigate}
+                  className={[
+                    "group relative w-full flex items-center gap-2 min-[375px]:gap-3 px-2 min-[375px]:px-3 py-2 min-[375px]:py-2.5 rounded-lg border transition-all",
+                    isActive
+                      ? "bg-white/80 border-gray-200/50 text-gray-900"
+                      : "border-transparent text-gray-600 hover:bg-white/80 hover:border-gray-200/50 hover:text-gray-900",
+                  ].join(" ")}
+                  aria-current={isActive ? "page" : undefined}
+                >
+                  <div
+                    className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-9 rounded-r-full transition-all"
+                    style={{
+                      background: isActive ? "rgb(17 24 39)" : "rgb(209 213 219)",
+                      opacity: isActive ? 0.9 : 0.6,
+                    }}
+                  />
 
                 <div className="ml-0.5 w-9 min-[375px]:w-11 h-9 min-[375px]:h-11 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden transition-all bg-gray-200 group-hover:bg-gray-100">
                   {item.thumbnailUrl ? (
@@ -184,8 +201,9 @@ export function Sidebar({ open }: SidebarProps) {
                     <PillStat label="F" value={item.features} dashed />
                   </div>
                 </div>
-              </button>
-            ))}
+              </Link>
+              );
+            })}
           </div>
         </div>
       </div>

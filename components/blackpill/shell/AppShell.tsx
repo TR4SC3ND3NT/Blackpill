@@ -10,9 +10,10 @@ import { Sidebar } from "@/components/blackpill/shell/Sidebar";
 export type AppShellProps = {
   children: React.ReactNode;
   loading?: boolean;
+  selectedAnalysisId?: string;
 };
 
-export function AppShell({ children, loading = false }: AppShellProps) {
+export function AppShell({ children, loading = false, selectedAnalysisId }: AppShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const sidebarWidth = "min(320px, 100vw)";
 
@@ -29,7 +30,11 @@ export function AppShell({ children, loading = false }: AppShellProps) {
 
   return (
     <div className="min-h-screen flex flex-col bg-neutral-50 relative">
-      <Sidebar open={sidebarOpen} />
+      <Sidebar
+        open={sidebarOpen}
+        selectedId={selectedAnalysisId}
+        onNavigate={() => setSidebarOpen(false)}
+      />
       {sidebarOpen ? (
         <button
           type="button"
