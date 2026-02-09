@@ -1,13 +1,20 @@
+"use client";
+
 import { Avatar } from "@/components/blackpill/Avatar";
 import { mockDashboard } from "@/lib/mock/dashboard";
 
-export function Sidebar() {
+export type SidebarProps = {
+  open: boolean;
+};
+
+export function Sidebar({ open }: SidebarProps) {
   const { user, history } = mockDashboard;
 
   return (
     <aside
-      className="flex flex-col fixed top-0 bottom-0 left-0 z-50 bg-white w-[min(320px,100vw)] shadow-2xl"
-      style={{ boxShadow: "none", transform: "translateX(-100%)" }}
+      className="flex flex-col fixed top-0 bottom-0 left-0 z-50 bg-white w-[min(320px,100vw)] shadow-2xl transition-transform duration-300"
+      style={{ boxShadow: "none", transform: open ? "translateX(0)" : "translateX(-100%)" }}
+      aria-hidden={!open}
     >
       <div className="relative h-12 flex items-center px-3 flex-shrink-0">
         <div className="flex items-center gap-1.5 flex-1 min-w-0">
@@ -205,4 +212,3 @@ function PillStat({ label, value, dashed }: { label: string; value: number; dash
     </div>
   );
 }
-

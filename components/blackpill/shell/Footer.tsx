@@ -1,3 +1,5 @@
+"use client";
+
 export function Footer() {
   return (
     <footer
@@ -105,4 +107,3 @@ export function Footer() {
     </footer>
   );
 }
-

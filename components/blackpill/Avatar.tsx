@@ -1,3 +1,5 @@
+"use client";
+
 import { cn } from "@/lib/cn";
 
 export type AvatarProps = {
@@ -53,4 +55,3 @@ export function Avatar({
     </span>
   );
 }
-

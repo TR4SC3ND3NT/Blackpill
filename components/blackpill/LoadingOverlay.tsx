@@ -1,3 +1,5 @@
+"use client";
+
 export type LoadingOverlayProps = {
   open: boolean;
   title?: string;
@@ -25,4 +27,3 @@ export function LoadingOverlay({
     </div>
   );
 }
-
