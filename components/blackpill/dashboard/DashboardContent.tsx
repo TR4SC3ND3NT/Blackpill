@@ -240,7 +240,7 @@ export function DashboardContent({ selectedId }: DashboardContentProps) {
                 <div className="min-w-0">
                   <div className="text-sm font-medium text-gray-900">Overall Trend</div>
                   <div className="mt-1 text-xs text-gray-500">
-                    Placeholder chart. Mock series included.
+                    Placeholder chart derived from saved snapshots.
                   </div>
                 </div>
                 <Badge className="shrink-0">Last 30 days</Badge>
@@ -270,8 +270,8 @@ export function DashboardContent({ selectedId }: DashboardContentProps) {
                     </div>
                   </div>
                   <div className="px-4 py-3 flex items-center justify-between">
-                    <div className="text-xs text-gray-500">Mock points: {series.overall.length}</div>
-                    <div className="text-xs text-gray-500">UI only</div>
+                    <div className="text-xs text-gray-500">Points: {series.overall.length}</div>
+                    <div className="text-xs text-gray-500">Local history</div>
                   </div>
                 </div>
               </div>
@@ -336,7 +336,7 @@ export function DashboardContent({ selectedId }: DashboardContentProps) {
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
                   <div className="text-sm font-medium text-gray-900">Overview</div>
-                  <div className="mt-1 text-xs text-gray-500">Mocked KPIs and selection.</div>
+                  <div className="mt-1 text-xs text-gray-500">Derived from saved snapshots.</div>
                 </div>
                 <Badge>Blackpill</Badge>
               </div>

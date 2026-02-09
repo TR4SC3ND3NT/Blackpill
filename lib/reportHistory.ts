@@ -71,6 +71,22 @@ export function addReportExport(report: ReportExport): void {
   window.dispatchEvent(new Event(EVENT_NAME));
 }
 
+export function deleteReportExport(id: string): void {
+  if (!isBrowser()) return;
+  if (!id) return;
+  const current = loadReportExports();
+  const next = current.filter((r) => r.id !== id);
+  if (next.length === current.length) return;
+  window.localStorage.setItem(LS_KEY, JSON.stringify(next));
+  window.dispatchEvent(new Event(EVENT_NAME));
+}
+
+export function clearReportExports(): void {
+  if (!isBrowser()) return;
+  window.localStorage.removeItem(LS_KEY);
+  window.dispatchEvent(new Event(EVENT_NAME));
+}
+
 export function subscribeReportExports(callback: () => void): () => void {
   if (!isBrowser()) return () => {};
   const handler = () => callback();
@@ -81,4 +97,3 @@ export function subscribeReportExports(callback: () => void): () => void {
     window.removeEventListener(EVENT_NAME, handler);
   };
 }
-

@@ -7,7 +7,7 @@ export const metadata: Metadata = {
     default: "Blackpill",
     template: "%s | Blackpill",
   },
-  description: "Blackpill UI shell (mock).",
+  description: "Blackpill UI shell.",
 };
 
 export default function UiLayout({

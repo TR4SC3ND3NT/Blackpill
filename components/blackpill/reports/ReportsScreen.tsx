@@ -7,7 +7,7 @@ import { AppShell } from "@/components/blackpill/shell/AppShell";
 import type { AnalysisSnapshot } from "@/lib/analysisHistory";
 import { formatAgoShort, loadSnapshots, subscribeSnapshots } from "@/lib/analysisHistory";
 import type { ReportExport, ReportExportStatus } from "@/lib/reportHistory";
-import { addReportExport, loadReportExports, subscribeReportExports } from "@/lib/reportHistory";
+import { addReportExport, clearReportExports, loadReportExports, subscribeReportExports } from "@/lib/reportHistory";
 import { buildSnapshotReportPayload, snapshotMetricsToCsv } from "@/lib/snapshotExport";
 import { cn } from "@/lib/cn";
 
@@ -300,7 +300,27 @@ export function ReportsScreen() {
                   Stored locally in your browser.
                 </div>
               </div>
-              <Badge className="bg-gray-50 text-gray-600">{visibleReports.length}</Badge>
+              <div className="flex items-center gap-2">
+                <Badge className="bg-gray-50 text-gray-600">{visibleReports.length}</Badge>
+                <button
+                  type="button"
+                  disabled={!reports.length}
+                  onClick={() => {
+                    if (!reports.length) return;
+                    if (!window.confirm("Clear export history? This removes report records from this browser.")) return;
+                    clearReportExports();
+                  }}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors border",
+                    reports.length
+                      ? "text-gray-600 hover:text-gray-900 hover:bg-gray-100 border-gray-200"
+                      : "text-gray-400 border-gray-200 bg-gray-50 cursor-not-allowed",
+                  )}
+                  title="Clear export history"
+                >
+                  Clear
+                </button>
+              </div>
             </div>
 
             <div className="overflow-x-auto">
