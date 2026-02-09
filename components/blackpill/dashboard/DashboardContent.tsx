@@ -7,7 +7,6 @@ import { Card } from "@/components/blackpill/Card";
 import type { AnalysisSnapshot } from "@/lib/analysisHistory";
 import { formatAgoShort, loadSnapshots, subscribeSnapshots } from "@/lib/analysisHistory";
 import { cn } from "@/lib/cn";
-import { getMockAnalysisDetails, mockDashboard } from "@/lib/mock/dashboard";
 
 export type DashboardContentProps = {
   selectedId?: string;
@@ -20,17 +19,22 @@ export function DashboardContent({ selectedId }: DashboardContentProps) {
     return subscribeSnapshots(() => setSnapshots(loadSnapshots()));
   }, []);
 
+  const effectiveSelectedId = selectedId ?? snapshots[0]?.id ?? null;
+
   const { history, kpis, series, selected, cohortLabel } = useMemo(() => {
     if (!snapshots.length) {
-      const latest = mockDashboard.history[0] ?? null;
-      const selectedMock = selectedId ? getMockAnalysisDetails(selectedId) : null;
       return {
-        history: mockDashboard.history,
-        kpis: mockDashboard.kpis,
-        series: mockDashboard.series,
-        selected: selectedMock,
-        cohortLabel: "asian_male_young",
-        latest,
+        history: [],
+        kpis: {
+          overallAvg: 0,
+          overallAvgDelta: undefined,
+          bestOverall: 0,
+          analysesCount: 0,
+          last7Days: 0,
+        },
+        series: { overall: [] as Array<{ t: string; overall: number }> },
+        selected: null,
+        cohortLabel: "—",
       };
     }
 
@@ -77,7 +81,9 @@ export function DashboardContent({ selectedId }: DashboardContentProps) {
         .map((s) => ({ t: s.createdAtIso, overall: Math.round(s.overall) })),
     };
 
-    const selectedSnapshot = selectedId ? snapshots.find((s) => s.id === selectedId) ?? null : null;
+    const selectedSnapshot = effectiveSelectedId
+      ? snapshots.find((s) => s.id === effectiveSelectedId) ?? null
+      : null;
     const selectedFromSnapshots = selectedSnapshot
       ? {
           id: selectedSnapshot.id,
@@ -91,7 +97,7 @@ export function DashboardContent({ selectedId }: DashboardContentProps) {
             dimorphism: Number((selectedSnapshot.pillarScores.dimorphism / 10).toFixed(1)),
             features: Number((selectedSnapshot.pillarScores.features / 10).toFixed(1)),
           },
-          notes: `Cohort: ${selectedSnapshot.cohortKey}. Snapshot stored locally (UI-only).`,
+          notes: `Cohort: ${selectedSnapshot.cohortKey}.`,
         }
       : null;
 
@@ -104,7 +110,44 @@ export function DashboardContent({ selectedId }: DashboardContentProps) {
       selected: selectedFromSnapshots,
       cohortLabel,
     };
-  }, [selectedId, snapshots]);
+  }, [effectiveSelectedId, snapshots]);
+
+  if (!snapshots.length) {
+    return (
+      <div className="max-w-7xl mx-auto px-6 py-6 sm:py-8">
+        <Card className="rounded-xl border-gray-200/60 p-6">
+          <div className="text-sm font-medium text-gray-900">No analyses yet</div>
+          <div className="mt-1 text-sm text-gray-600">
+            Run an analysis to populate your dashboard history.
+          </div>
+          <div className="mt-4">
+            <Link
+              href="/"
+              className="inline-flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition-colors border border-gray-200"
+            >
+              Run analysis
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="lucide lucide-arrow-right h-4 w-4"
+                aria-hidden="true"
+              >
+                <path d="M5 12h14" />
+                <path d="m12 5 7 7-7 7" />
+              </svg>
+            </Link>
+          </div>
+        </Card>
+      </div>
+    );
+  }
 
   const latest = history[0] ?? null;
 
@@ -297,7 +340,7 @@ export function DashboardContent({ selectedId }: DashboardContentProps) {
 
               <div className="mt-5 space-y-3">
                 <LineItem label="Cohort" value={cohortLabel} />
-                <LineItem label="Plan" value={mockDashboard.user.planLabel} />
+                <LineItem label="Plan" value="Free" />
                 <LineItem label="Retention" value="Enabled" />
               </div>
             </Card>

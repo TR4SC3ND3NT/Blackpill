@@ -2,9 +2,8 @@
 
 import Link from "next/link";
 import { Avatar } from "@/components/blackpill/Avatar";
-import { formatAgoShort, loadSnapshots, subscribeSnapshots } from "@/lib/analysisHistory";
-import { mockDashboard } from "@/lib/mock/dashboard";
 import { useEffect, useMemo, useState } from "react";
+import { formatAgoShort, loadSnapshots, subscribeSnapshots } from "@/lib/analysisHistory";
 
 export type SidebarProps = {
   open: boolean;
@@ -13,7 +12,6 @@ export type SidebarProps = {
 };
 
 export function Sidebar({ open, selectedId, onNavigate }: SidebarProps) {
-  const { user } = mockDashboard;
   const [snapshots, setSnapshots] = useState(() => loadSnapshots());
 
   useEffect(() => {
@@ -21,7 +19,7 @@ export function Sidebar({ open, selectedId, onNavigate }: SidebarProps) {
   }, []);
 
   const history = useMemo(() => {
-    if (!snapshots.length) return mockDashboard.history;
+    if (!snapshots.length) return [];
     const now = new Date(snapshots[0]?.createdAtIso ?? 0).getTime();
     return snapshots.map((s) => ({
       id: s.id,
@@ -56,24 +54,24 @@ export function Sidebar({ open, selectedId, onNavigate }: SidebarProps) {
               <Avatar
                 shape="square"
                 size="md"
-                src={user.avatarUrl}
-                fallback={user.initials}
+                src={null}
+                fallback="B"
                 className="relative z-10 w-full h-full bg-transparent"
               />
               <span
                 className="text-sm font-medium text-gray-600 absolute inset-0 flex items-center justify-center z-0"
                 style={{ display: "flex" }}
               >
-                {user.initials}
+                B
               </span>
             </div>
 
-            <div className="flex-1 text-left min-w-0">
-              <div className="text-sm font-medium text-gray-900 leading-tight truncate">
-                {user.name}
-              </div>
-              <div className="text-xs text-gray-500 leading-tight mt-0.5">{user.planLabel}</div>
+          <div className="flex-1 text-left min-w-0">
+            <div className="text-sm font-medium text-gray-900 leading-tight truncate">
+                Blackpill User
             </div>
+            <div className="text-xs text-gray-500 leading-tight mt-0.5">Free</div>
+          </div>
 
             <div>
               <button
@@ -159,6 +157,10 @@ export function Sidebar({ open, selectedId, onNavigate }: SidebarProps) {
 
         <div className="flex-1 overflow-y-auto px-3 py-2">
           <div className="space-y-1">
+            {!history.length ? (
+              <div className="px-2 py-3 text-xs text-gray-500">No analyses yet.</div>
+            ) : null}
+
             {history.map((item, idx) => {
               const isActive = selectedId ? item.id === selectedId : idx === 0;
 
