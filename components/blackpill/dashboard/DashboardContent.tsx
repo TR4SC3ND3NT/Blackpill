@@ -19,7 +19,10 @@ export function DashboardContent({ selectedId }: DashboardContentProps) {
     return subscribeSnapshots(() => setSnapshots(loadSnapshots()));
   }, []);
 
-  const effectiveSelectedId = selectedId ?? snapshots[0]?.id ?? null;
+  const effectiveSelectedId = useMemo(() => {
+    if (selectedId && snapshots.some((s) => s.id === selectedId)) return selectedId;
+    return snapshots[0]?.id ?? null;
+  }, [selectedId, snapshots]);
 
   const { history, kpis, series, selected, cohortLabel } = useMemo(() => {
     if (!snapshots.length) {
@@ -288,9 +291,9 @@ export function DashboardContent({ selectedId }: DashboardContentProps) {
                     href={`/ui/dashboard/${item.id}`}
                     className={cn(
                       "block px-4 sm:px-6 py-4 transition-colors",
-                      item.id === selectedId ? "bg-gray-50" : "hover:bg-gray-50",
+                      item.id === effectiveSelectedId ? "bg-gray-50" : "hover:bg-gray-50",
                     )}
-                    aria-current={item.id === selectedId ? "page" : undefined}
+                    aria-current={item.id === effectiveSelectedId ? "page" : undefined}
                   >
                     <div className="flex items-center justify-between gap-4">
                       <div className="min-w-0">

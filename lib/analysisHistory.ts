@@ -122,6 +122,22 @@ export function saveSnapshot(snapshot: AnalysisSnapshot): void {
   window.dispatchEvent(new Event(EVENT_NAME));
 }
 
+export function deleteSnapshot(id: string): void {
+  if (!isBrowser()) return;
+  if (!id) return;
+  const current = loadSnapshots();
+  const next = current.filter((s) => s.id !== id);
+  if (next.length === current.length) return;
+  window.localStorage.setItem(LS_KEY, JSON.stringify(next));
+  window.dispatchEvent(new Event(EVENT_NAME));
+}
+
+export function clearSnapshots(): void {
+  if (!isBrowser()) return;
+  window.localStorage.removeItem(LS_KEY);
+  window.dispatchEvent(new Event(EVENT_NAME));
+}
+
 export function saveSnapshotFromFace(face: FaceRecord): void {
   if (!face?.id) return;
 
