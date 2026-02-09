@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/blackpill/Button";
 import { Card } from "@/components/blackpill/Card";
 import { cn } from "@/lib/cn";
 import { mockSettings, type SettingsItem, type SettingsSection, type SettingsSectionId } from "@/lib/mock/settings";
+import { loadUiSettings, saveUiSettings, subscribeUiSettings, type UiSettings } from "@/lib/uiSettings";
 
 type SettingValue = string | boolean;
 type SettingsValues = Record<string, SettingValue>;
@@ -14,17 +15,28 @@ export function SettingsContent() {
   const sectionIds = useMemo(() => sections.map((s) => s.id), [sections]);
   const [active, setActive] = useState<SettingsSectionId>(sectionIds[0] ?? "general");
   const [values, setValues] = useState<SettingsValues>(() => {
+    const stored = loadUiSettings();
     const next: SettingsValues = {};
     for (const section of sections) {
-      for (const item of section.items) next[item.id] = item.value;
+      for (const item of section.items) {
+        const storedValue = (stored as unknown as Record<string, SettingValue>)[item.id];
+        next[item.id] = typeof storedValue !== "undefined" ? storedValue : item.value;
+      }
     }
     return next;
   });
 
+  useEffect(() => {
+    return subscribeUiSettings(() => {
+      const stored = loadUiSettings();
+      setValues((prev) => ({ ...prev, ...stored }));
+    });
+  }, []);
+
   const activeSection = sections.find((s) => s.id === active) ?? sections[0];
 
   return (
-    <div className="max-w-7xl mx-auto px-6 py-6 sm:py-8">
+    <div className="max-w-7xl mx-auto px-6 py-[var(--bp-content-py)] sm:py-[var(--bp-content-py-sm)]">
       <div className="space-y-6">
         <div className="flex flex-col lg:flex-row gap-4 lg:gap-8">
           <SectionNavMobile
@@ -60,7 +72,20 @@ export function SettingsContent() {
               <SectionPanel
                 section={activeSection}
                 values={values}
-                onValueChange={(id, value) => setValues((prev) => ({ ...prev, [id]: value }))}
+                onValueChange={(id, value) => {
+                  setValues((prev) => ({ ...prev, [id]: value }));
+                  if (
+                    id === "language" ||
+                    id === "units" ||
+                    id === "defaultCohort" ||
+                    id === "shareAnonymizedAnalytics" ||
+                    id === "allowModelImprovement" ||
+                    id === "compactMode" ||
+                    id === "reducedMotion"
+                  ) {
+                    saveUiSettings({ [id]: value } as Partial<UiSettings>);
+                  }
+                }}
               />
             ) : null}
           </div>
@@ -235,4 +260,3 @@ function Toggle({
     </button>
   );
 }
-

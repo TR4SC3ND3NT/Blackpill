@@ -86,7 +86,7 @@ export function AnalyticsScreen() {
       subtitle="Trends and breakdowns"
       rightSlot={<TimeRangeButtons value={timeRange} onChange={setTimeRange} />}
     >
-      <div className="max-w-7xl mx-auto px-6 py-6 sm:py-8">
+      <div className="max-w-7xl mx-auto px-6 py-[var(--bp-content-py)] sm:py-[var(--bp-content-py-sm)]">
         {!snapshots.length ? (
           <Card className="rounded-xl border-gray-200/60 p-6">
             <div className="text-sm font-medium text-gray-900">No analytics yet</div>
@@ -319,4 +319,3 @@ function KpiCard({
     </Card>
   );
 }
-

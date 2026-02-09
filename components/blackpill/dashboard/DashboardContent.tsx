@@ -114,7 +114,7 @@ export function DashboardContent({ selectedId }: DashboardContentProps) {
 
   if (!snapshots.length) {
     return (
-      <div className="max-w-7xl mx-auto px-6 py-6 sm:py-8">
+      <div className="max-w-7xl mx-auto px-6 py-[var(--bp-content-py)] sm:py-[var(--bp-content-py-sm)]">
         <Card className="rounded-xl border-gray-200/60 p-6">
           <div className="text-sm font-medium text-gray-900">No analyses yet</div>
           <div className="mt-1 text-sm text-gray-600">
@@ -152,7 +152,7 @@ export function DashboardContent({ selectedId }: DashboardContentProps) {
   const latest = history[0] ?? null;
 
   return (
-    <div className="max-w-7xl mx-auto px-6 py-6 sm:py-8">
+    <div className="max-w-7xl mx-auto px-6 py-[var(--bp-content-py)] sm:py-[var(--bp-content-py-sm)]">
       <div className="space-y-6">
         <section className="flex flex-col sm:flex-row gap-3">
           <KpiCard

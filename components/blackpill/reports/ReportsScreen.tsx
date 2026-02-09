@@ -133,7 +133,7 @@ export function ReportsScreen() {
         </button>
       }
     >
-      <div className="max-w-7xl mx-auto px-6 py-6 sm:py-8">
+      <div className="max-w-7xl mx-auto px-6 py-[var(--bp-content-py)] sm:py-[var(--bp-content-py-sm)]">
         <div className="space-y-6">
           <Card className="rounded-xl border-gray-200/60 p-4 sm:p-6">
             <div className="flex flex-col lg:flex-row gap-3 lg:items-center lg:justify-between">

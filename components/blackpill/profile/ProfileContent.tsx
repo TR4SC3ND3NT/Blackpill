@@ -1,11 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/blackpill/Badge";
 import { Button } from "@/components/blackpill/Button";
 import { Card } from "@/components/blackpill/Card";
+import type { AnalysisSnapshot } from "@/lib/analysisHistory";
+import { getStats, loadSnapshots, subscribeSnapshots } from "@/lib/analysisHistory";
 import { cn } from "@/lib/cn";
 import { mockProfile, type ProfileTabId } from "@/lib/mock/profile";
+import type { ReportExport } from "@/lib/reportHistory";
+import { loadReportExports, subscribeReportExports } from "@/lib/reportHistory";
 
 const tabs: Array<{ id: ProfileTabId; label: string }> = [
   { id: "account", label: "Account" },
@@ -15,9 +19,50 @@ const tabs: Array<{ id: ProfileTabId; label: string }> = [
 
 export function ProfileContent() {
   const [active, setActive] = useState<ProfileTabId>("account");
+  const [snapshots, setSnapshots] = useState<AnalysisSnapshot[]>(() => loadSnapshots());
+  const [exports, setExports] = useState<ReportExport[]>(() => loadReportExports());
+
+  useEffect(() => {
+    return subscribeSnapshots(() => setSnapshots(loadSnapshots()));
+  }, []);
+
+  useEffect(() => {
+    return subscribeReportExports(() => setExports(loadReportExports()));
+  }, []);
+
+  const derived = useMemo(() => {
+    const stats = getStats(snapshots);
+    const latestCohort = snapshots[0]?.cohortKey ?? mockProfile.plan.cohortLabel;
+
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth();
+    const exportsThisMonth = exports.filter((e) => {
+      const d = new Date(e.createdAtIso);
+      return d.getFullYear() === year && d.getMonth() === month;
+    }).length;
+
+    const lastActiveLabel = stats.lastActiveIso
+      ? new Date(stats.lastActiveIso).toLocaleString(undefined, {
+          year: "numeric",
+          month: "short",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+        })
+      : "—";
+
+    return {
+      analysesThisMonth: stats.thisMonthCount,
+      exportsThisMonth,
+      lastActiveLabel,
+      latestCohort,
+      totalAnalyses: stats.totalCount,
+    };
+  }, [exports, snapshots]);
 
   return (
-    <div className="max-w-7xl mx-auto px-6 py-6 sm:py-8">
+    <div className="max-w-7xl mx-auto px-6 py-[var(--bp-content-py)] sm:py-[var(--bp-content-py-sm)]">
       <div className="space-y-6">
         <div className="flex flex-col lg:flex-row gap-4 lg:gap-8">
           <nav className="lg:hidden -mx-6 px-6 overflow-x-auto">
@@ -68,8 +113,16 @@ export function ProfileContent() {
 
           <main className="flex-1 min-w-0">
             {active === "account" ? <AccountTab /> : null}
-            {active === "usage" ? <UsageTab /> : null}
-            {active === "plan" ? <PlanTab /> : null}
+            {active === "usage" ? (
+              <UsageTab
+                analysesThisMonth={derived.analysesThisMonth}
+                exportsThisMonth={derived.exportsThisMonth}
+                lastActiveLabel={derived.lastActiveLabel}
+                latestCohort={derived.latestCohort}
+                totalAnalyses={derived.totalAnalyses}
+              />
+            ) : null}
+            {active === "plan" ? <PlanTab cohortLabel={derived.latestCohort} /> : null}
           </main>
         </div>
       </div>
@@ -117,27 +170,39 @@ function AccountTab() {
   );
 }
 
-function UsageTab() {
+function UsageTab({
+  analysesThisMonth,
+  exportsThisMonth,
+  lastActiveLabel,
+  latestCohort,
+  totalAnalyses,
+}: {
+  analysesThisMonth: number;
+  exportsThisMonth: number;
+  lastActiveLabel: string;
+  latestCohort: string;
+  totalAnalyses: number;
+}) {
   return (
     <div className="space-y-6">
       <section className="flex flex-col sm:flex-row gap-3">
-        <KpiCard label="Analyses" value={`${mockProfile.usage.analysesThisMonth}`} hint="This month (mock)" />
-        <KpiCard label="Exports" value={`${mockProfile.usage.exportsThisMonth}`} hint="This month (mock)" />
-        <KpiCard label="Last active" value={mockProfile.usage.lastActiveLabel} hint="Activity (mock)" />
+        <KpiCard label="Analyses" value={`${analysesThisMonth}`} hint="This month" />
+        <KpiCard label="Exports" value={`${exportsThisMonth}`} hint="This month" />
+        <KpiCard label="Last active" value={lastActiveLabel} hint="From history" />
       </section>
 
       <Card className="rounded-xl border-gray-200/60 overflow-hidden">
         <div className="px-4 sm:px-6 py-4 border-b border-gray-100 flex items-start justify-between gap-4">
           <div className="min-w-0">
             <div className="text-sm font-medium text-gray-900">Usage details</div>
-            <div className="mt-1 text-xs text-gray-500">Mock rows styled like the reference.</div>
+            <div className="mt-1 text-xs text-gray-500">Derived from local history.</div>
           </div>
         </div>
         <div className="divide-y divide-gray-100">
           {[
-            { label: "Latest cohort", value: mockProfile.plan.cohortLabel },
+            { label: "Latest cohort", value: latestCohort },
             { label: "History retention", value: "Enabled" },
-            { label: "Exports", value: "UI only" },
+            { label: "Total analyses", value: `${totalAnalyses}` },
           ].map((row) => (
             <div key={row.label} className="px-4 sm:px-6 py-4 flex items-center justify-between gap-4">
               <span className="text-sm text-gray-700">{row.label}</span>
@@ -150,7 +215,7 @@ function UsageTab() {
   );
 }
 
-function PlanTab() {
+function PlanTab({ cohortLabel }: { cohortLabel: string }) {
   return (
     <div className="space-y-6">
       <Card className="rounded-xl border-gray-200/60 p-4 sm:p-6">
@@ -173,7 +238,7 @@ function PlanTab() {
           </div>
           <div className="flex items-center justify-between py-2 border-t border-gray-100">
             <span className="text-sm text-gray-600">Default cohort</span>
-            <span className="text-sm font-medium text-gray-900">{mockProfile.plan.cohortLabel}</span>
+            <span className="text-sm font-medium text-gray-900">{cohortLabel}</span>
           </div>
         </div>
 
@@ -239,4 +304,3 @@ function KpiCard({ label, value, hint }: { label: string; value: string; hint: s
     </Card>
   );
 }
-

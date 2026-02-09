@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./ui.css";
+import { UiSettingsApplier } from "@/components/blackpill/shell/UiSettingsApplier";
 
 export const metadata: Metadata = {
   title: {
@@ -18,8 +19,8 @@ export default function UiLayout({
   // clone as a full-viewport layer so it can't affect the existing flow.
   return (
     <div className="bp fixed inset-0 overflow-y-auto bg-neutral-50 text-gray-900 antialiased">
+      <UiSettingsApplier />
       {children}
     </div>
   );
 }
-

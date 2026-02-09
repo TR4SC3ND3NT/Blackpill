@@ -7,6 +7,24 @@
   --bp-sidebar-w: min(320px, 100vw);
   --bp-muted: #72838c;
   --bp-discord: #5865f2;
+  --bp-header-h: 3.5rem; /* 56px */
+  --bp-content-py: 1.5rem; /* 24px */
+  --bp-content-py-sm: 2rem; /* 32px */
+}
+
+.bp.bp-compact {
+  --bp-header-h: 3.25rem; /* 52px */
+  --bp-content-py: 1rem; /* 16px */
+  --bp-content-py-sm: 1.25rem; /* 20px */
+}
+
+.bp.bp-reduce-motion *,
+.bp.bp-reduce-motion *::before,
+.bp.bp-reduce-motion *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+  scroll-behavior: auto !important;
 }
 
 .bp *,
@@ -60,4 +78,3 @@
   --tw-backdrop-saturate: ;
   --tw-backdrop-sepia: ;
 }
-
