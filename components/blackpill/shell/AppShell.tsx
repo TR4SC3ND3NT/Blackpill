@@ -3,17 +3,30 @@
 import type * as React from "react";
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { LoadingOverlay } from "@/components/blackpill/LoadingOverlay";
 import { Footer } from "@/components/blackpill/shell/Footer";
 import { Sidebar } from "@/components/blackpill/shell/Sidebar";
+import { cn } from "@/lib/cn";
 
 export type AppShellProps = {
   children: React.ReactNode;
+  title: string;
+  subtitle?: string;
+  rightSlot?: React.ReactNode;
   loading?: boolean;
   selectedAnalysisId?: string;
 };
 
-export function AppShell({ children, loading = false, selectedAnalysisId }: AppShellProps) {
+export function AppShell({
+  children,
+  title,
+  subtitle,
+  rightSlot,
+  loading = false,
+  selectedAnalysisId,
+}: AppShellProps) {
+  const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const sidebarWidth = "min(320px, 100vw)";
 
@@ -95,37 +108,46 @@ export function AppShell({ children, loading = false, selectedAnalysisId }: AppS
               </button>
               <div className="min-w-0">
                 <div className="text-sm font-semibold text-gray-900 leading-none truncate">
-                  Dashboard
+                  {title}
                 </div>
-                <div className="text-xs text-gray-500 leading-none mt-1 truncate">
-                  Overview and recent analyses
-                </div>
+                {subtitle ? (
+                  <div className="text-xs text-gray-500 leading-none mt-1 truncate">{subtitle}</div>
+                ) : null}
               </div>
             </div>
 
             <div className="flex items-center gap-2">
-              <Link
-                className="inline-flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition-colors border border-gray-200"
-                href="/"
-              >
-                New analysis
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="24"
-                  height="24"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="lucide lucide-plus h-4 w-4"
-                  aria-hidden="true"
-                >
-                  <path d="M5 12h14" />
-                  <path d="M12 5v14" />
-                </svg>
-              </Link>
+              <nav className="hidden md:flex items-center gap-1">
+                <HeaderNavLink href="/ui/dashboard" pathname={pathname}>
+                  Dashboard
+                </HeaderNavLink>
+                <HeaderNavLink href="/ui/analytics" pathname={pathname}>
+                  Analytics
+                </HeaderNavLink>
+                <HeaderNavLink href="/ui/reports" pathname={pathname}>
+                  Reports
+                </HeaderNavLink>
+                <HeaderNavLink href="/ui/settings" pathname={pathname}>
+                  Settings
+                </HeaderNavLink>
+                <HeaderNavLink href="/ui/profile" pathname={pathname}>
+                  Profile
+                </HeaderNavLink>
+              </nav>
+
+              <nav className="flex md:hidden items-center gap-1">
+                <HeaderNavLink href="/ui/dashboard" pathname={pathname}>
+                  Dash
+                </HeaderNavLink>
+                <HeaderNavLink href="/ui/settings" pathname={pathname}>
+                  Settings
+                </HeaderNavLink>
+                <HeaderNavLink href="/ui/profile" pathname={pathname}>
+                  Profile
+                </HeaderNavLink>
+              </nav>
+
+              {rightSlot ? <div className="flex items-center gap-2">{rightSlot}</div> : null}
             </div>
           </div>
         </div>
@@ -135,5 +157,32 @@ export function AppShell({ children, loading = false, selectedAnalysisId }: AppS
       </main>
       <LoadingOverlay open={loading} />
     </div>
+  );
+}
+
+function HeaderNavLink({
+  href,
+  pathname,
+  children,
+}: {
+  href: string;
+  pathname: string;
+  children: React.ReactNode;
+}) {
+  const isActive = pathname === href || pathname.startsWith(`${href}/`);
+
+  return (
+    <Link
+      href={href}
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors border",
+        isActive
+          ? "text-gray-900 bg-gray-100 border-gray-200"
+          : "text-gray-600 border-transparent hover:text-gray-900 hover:bg-gray-100 hover:border-gray-200",
+      )}
+      aria-current={isActive ? "page" : undefined}
+    >
+      {children}
+    </Link>
   );
 }
