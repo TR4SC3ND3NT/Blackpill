@@ -80,6 +80,47 @@ export function AnalyticsScreen() {
     return counts.map((c) => Math.round((c / peak) * 64));
   }, [values]);
 
+  const lineModel = useMemo(() => {
+    const points = analytics.seriesOverall.slice(-60);
+    const n = points.length;
+    if (!n) return null;
+
+    const w = 640;
+    const h = 220;
+    const pad = 14;
+    const innerW = w - pad * 2;
+    const innerH = h - pad * 2;
+
+    const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
+    const toY = (value: number) => {
+      const pct = clamp01(value / 100);
+      return pad + innerH - pct * innerH;
+    };
+
+    const xs = new Array<number>(n);
+    const ys = new Array<number>(n);
+    for (let i = 0; i < n; i += 1) {
+      const x = pad + (n === 1 ? innerW : (i / (n - 1)) * innerW);
+      xs[i] = x;
+      ys[i] = toY(points[i]?.value ?? 0);
+    }
+
+    const lineD =
+      n === 1
+        ? `M ${pad} ${ys[0]} L ${pad + innerW} ${ys[0]}`
+        : xs.map((x, i) => `${i === 0 ? "M" : "L"} ${x} ${ys[i]}`).join(" ");
+
+    const areaD =
+      n === 1
+        ? `${lineD} L ${pad + innerW} ${pad + innerH} L ${pad} ${pad + innerH} Z`
+        : `${lineD} L ${pad + innerW} ${pad + innerH} L ${pad} ${pad + innerH} Z`;
+
+    const lastX = n === 1 ? pad + innerW : xs[n - 1];
+    const lastY = ys[n - 1];
+
+    return { w, h, lineD, areaD, lastX, lastY, count: n };
+  }, [analytics.seriesOverall]);
+
   return (
     <AppShell
       title="Analytics"
@@ -147,33 +188,54 @@ export function AnalyticsScreen() {
 
                   <div className="px-4 sm:px-6 py-6">
                     <div className="rounded-xl border border-gray-200/60 bg-gradient-to-b from-gray-50 to-white overflow-hidden">
-                      <div
-                        className="h-64 relative"
-                        style={{
-                          backgroundImage:
-                            "linear-gradient(to right, rgba(17, 24, 39, 0.04) 1px, transparent 1px), linear-gradient(to bottom, rgba(17, 24, 39, 0.04) 1px, transparent 1px)",
-                          backgroundSize: "48px 48px",
-                        }}
-                      >
-                        <div className="absolute inset-0 flex items-end px-4 pb-4">
-                          <div className="flex items-end gap-2 w-full">
-                            {analytics.seriesOverall.slice(-18).map((p) => (
-                              <div key={p.t} className="flex-1 min-w-0">
-                                <div
-                                  className="w-full rounded-md bg-gray-900/10"
-                                  style={{
-                                    height: `${Math.max(10, Math.round((p.value / 100) * 160))}px`,
-                                  }}
-                                />
-                              </div>
-                            ))}
-                          </div>
+                    <div
+                      className="h-64 relative"
+                      style={{
+                        backgroundImage:
+                          "linear-gradient(to right, rgba(17, 24, 39, 0.04) 1px, transparent 1px), linear-gradient(to bottom, rgba(17, 24, 39, 0.04) 1px, transparent 1px)",
+                        backgroundSize: "48px 48px",
+                      }}
+                    >
+                      {lineModel ? (
+                        <div className="absolute inset-0 p-4">
+                          <svg
+                            viewBox={`0 0 ${lineModel.w} ${lineModel.h}`}
+                            className="w-full h-full"
+                            preserveAspectRatio="none"
+                            role="img"
+                            aria-label="Overall trend line chart"
+                          >
+                            <defs>
+                              <linearGradient id="bp-analytics-fill" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stopColor="rgba(17, 24, 39, 0.18)" />
+                                <stop offset="100%" stopColor="rgba(17, 24, 39, 0.02)" />
+                              </linearGradient>
+                            </defs>
+                            <path d={lineModel.areaD} fill="url(#bp-analytics-fill)" />
+                            <path
+                              d={lineModel.lineD}
+                              fill="none"
+                              stroke="rgba(17, 24, 39, 0.55)"
+                              strokeWidth="2.5"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                            <circle
+                              cx={lineModel.lastX}
+                              cy={lineModel.lastY}
+                              r="5"
+                              fill="white"
+                              stroke="rgba(17, 24, 39, 0.65)"
+                              strokeWidth="2"
+                            />
+                          </svg>
                         </div>
+                      ) : null}
+                    </div>
+                    <div className="px-4 py-3 flex items-center justify-between">
+                      <div className="text-xs text-gray-500">
+                        Active cohort: {analytics.cohortLabel ?? "—"}
                       </div>
-                      <div className="px-4 py-3 flex items-center justify-between">
-                        <div className="text-xs text-gray-500">
-                          Active cohort: {analytics.cohortLabel ?? "—"}
-                        </div>
                         <div className="text-xs text-gray-500">Blackpill</div>
                       </div>
                     </div>
