@@ -158,7 +158,7 @@ export function AppShell({
               {rightSlot ? <div className="flex items-center gap-2">{rightSlot}</div> : null}
 
               <Link
-                href="/"
+                href="/ui/new-analysis"
                 className="inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition-colors border border-gray-200"
               >
                 <span className="hidden sm:inline">New analysis</span>

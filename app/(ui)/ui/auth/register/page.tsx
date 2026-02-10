@@ -1,10 +1,10 @@
-import { ReferenceNotFound } from "@/components/blackpill/reference/ReferenceNotFound";
+import { RegisterScreen } from "@/components/blackpill/auth/RegisterScreen";
 
 export const metadata = {
-  title: "Auth Register",
+  title: "Register",
 };
 
 export default function UiAuthRegisterPage() {
-  return <ReferenceNotFound />;
+  return <RegisterScreen />;
 }
 

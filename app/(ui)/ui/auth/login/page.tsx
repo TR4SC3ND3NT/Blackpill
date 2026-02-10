@@ -1,10 +1,10 @@
-import { ReferenceNotFound } from "@/components/blackpill/reference/ReferenceNotFound";
+import { LoginScreen } from "@/components/blackpill/auth/LoginScreen";
 
 export const metadata = {
-  title: "Auth Login",
+  title: "Login",
 };
 
 export default function UiAuthLoginPage() {
-  return <ReferenceNotFound />;
+  return <LoginScreen />;
 }
 

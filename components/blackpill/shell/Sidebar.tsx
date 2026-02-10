@@ -152,7 +152,7 @@ export function Sidebar({ open, selectedId, onNavigate }: SidebarProps) {
           <h2 className="text-xs font-medium text-gray-500 uppercase tracking-wider">History</h2>
           <div className="flex items-center gap-2">
             <Link
-              href="/"
+              href="/ui/new-analysis"
               onClick={onNavigate}
               className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-200 transition-colors border border-gray-300"
             >
