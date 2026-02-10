@@ -67,8 +67,8 @@
 
 @media (min-width: 1024px) {
   .homeLayout {
-    grid-template-columns: 240px minmax(0, 1fr);
-    column-gap: 44px;
+    grid-template-columns: 220px minmax(0, 1fr);
+    column-gap: 36px;
   }
 }
 

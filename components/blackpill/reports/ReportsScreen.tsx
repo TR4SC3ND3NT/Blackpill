@@ -376,7 +376,7 @@ export function ReportsScreen() {
                               <tr
                                 key={row.id}
                                 className={cn(
-                                  "transition-colors cursor-pointer",
+                                  "transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-300",
                                   isSelected ? "bg-white/70" : "hover:bg-white/55",
                                 )}
                                 onClick={() => onSelectReport(row)}

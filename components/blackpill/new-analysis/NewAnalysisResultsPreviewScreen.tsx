@@ -182,7 +182,7 @@ function PhotoPanel({ title, dataUrl }: { title: string; dataUrl: string | null 
           {dataUrl ? "Ready" : "Missing"}
         </span>
       </div>
-      <div className="mt-3 aspect-square w-full max-h-[300px] rounded-lg border border-gray-200/50 bg-white/60 grid place-items-center overflow-hidden">
+      <div className="mt-3 aspect-square w-full max-w-[320px] max-h-[300px] mx-auto rounded-lg border border-gray-200/50 bg-white/60 grid place-items-center overflow-hidden">
         {dataUrl ? (
           <img src={dataUrl} alt={`${title} preview`} className="w-full h-full object-contain" />
         ) : (
@@ -209,4 +209,3 @@ function PillarRow({ label, value }: { label: string; value: number }) {
     </div>
   );
 }
-

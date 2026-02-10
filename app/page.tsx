@@ -29,36 +29,54 @@ const readRecentIds = () => {
 export default function Home() {
   const flow = useHomeFlow();
   const [recent, setRecent] = useState<RecentFace[]>([]);
-  const [recentIds] = useState<string[]>(() => readRecentIds());
-  const [recentLoading, setRecentLoading] = useState(recentIds.length > 0);
+  const [recentIds, setRecentIds] = useState<string[]>([]);
+  const [recentReady, setRecentReady] = useState(false);
+  const [recentLoading, setRecentLoading] = useState(true);
+
+  useEffect(() => {
+    // Avoid hydration mismatch: read localStorage only after mount.
+    const load = () => {
+      const ids = readRecentIds();
+      setRecentIds(ids);
+      setRecentReady(true);
+      setRecentLoading(ids.length > 0);
+      if (!ids.length) setRecent([]);
+    };
+    queueMicrotask(load);
+  }, []);
 
   useEffect(() => {
     let active = true;
-    Promise.all(
-      recentIds.map(async (id) => {
-        try {
-          const payload = await fetchJson<{ success: boolean; face: FaceRecord }>(`/api/faces/${id}`);
-          return payload.face ?? null;
-        } catch {
-          return null;
-        }
-      })
-    )
-      .then((faces) => {
-        if (!active) return;
-        const mapped = faces
-          .filter((face): face is FaceRecord => Boolean(face?.id))
-          .map((face) => ({
-            id: face.id,
-            createdAt: face.createdAt,
-            overallScore: face.overallScore,
-          }));
-        setRecent(mapped);
-      })
-      .finally(() => {
-        if (!active) return;
-        setRecentLoading(false);
-      });
+    const run = () => {
+      if (!recentIds.length) return;
+      setRecentLoading(true);
+      Promise.all(
+        recentIds.map(async (id) => {
+          try {
+            const payload = await fetchJson<{ success: boolean; face: FaceRecord }>(`/api/faces/${id}`);
+            return payload.face ?? null;
+          } catch {
+            return null;
+          }
+        })
+      )
+        .then((faces) => {
+          if (!active) return;
+          const mapped = faces
+            .filter((face): face is FaceRecord => Boolean(face?.id))
+            .map((face) => ({
+              id: face.id,
+              createdAt: face.createdAt,
+              overallScore: face.overallScore,
+            }));
+          setRecent(mapped);
+        })
+        .finally(() => {
+          if (!active) return;
+          setRecentLoading(false);
+        });
+    };
+    queueMicrotask(run);
 
     return () => {
       active = false;
@@ -66,10 +84,10 @@ export default function Home() {
   }, [recentIds]);
 
   const recentLabel = useMemo(() => {
-    if (recentLoading) return "Loading…";
+    if (!recentReady || recentLoading) return "Loading…";
     if (!recent.length) return "No analyses yet.";
     return null;
-  }, [recent, recentLoading]);
+  }, [recent, recentLoading, recentReady]);
 
   return (
     <main className={styles.homeShell}>

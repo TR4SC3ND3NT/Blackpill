@@ -102,7 +102,7 @@ function PreviewCard({
           Remove
         </Button>
       </div>
-      <div className="mt-3 aspect-square w-full max-h-[360px] rounded-lg border border-gray-200/50 bg-white/60 grid place-items-center overflow-hidden">
+      <div className="mt-3 aspect-square w-full max-w-[360px] max-h-[360px] mx-auto rounded-lg border border-gray-200/50 bg-white/60 grid place-items-center overflow-hidden">
         {dataUrl ? (
           <img src={dataUrl} alt={`${title} preview`} className="w-full h-full object-contain" />
         ) : (

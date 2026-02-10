@@ -327,13 +327,39 @@ export default function LandmarkCalibrator({
     const rect = container.getBoundingClientRect();
     if (!rect.width || !rect.height) return;
 
-    const relX = (event.clientX - rect.left) / rect.width;
-    const relY = (event.clientY - rect.top) / rect.height;
+    // SVG uses `preserveAspectRatio="xMidYMid meet"` to prevent image stretching; account for
+    // potential letterboxing when mapping pointer coords -> viewBox coords.
+    const imageW = Math.max(1, activeImage.width);
+    const imageH = Math.max(1, activeImage.height);
+    const viewBoxW = Math.max(1e-6, activeViewBox.width * imageW);
+    const viewBoxH = Math.max(1e-6, activeViewBox.height * imageH);
+
+    const scale = Math.min(rect.width / viewBoxW, rect.height / viewBoxH);
+    const renderW = viewBoxW * scale;
+    const renderH = viewBoxH * scale;
+    const offsetX = (rect.width - renderW) / 2;
+    const offsetY = (rect.height - renderH) / 2;
+
+    const xIn = event.clientX - rect.left - offsetX;
+    const yIn = event.clientY - rect.top - offsetY;
+    if (xIn < 0 || xIn > renderW || yIn < 0 || yIn > renderH) return;
+
+    const relX = xIn / renderW;
+    const relY = yIn / renderH;
     const x = activeViewBox.x + relX * activeViewBox.width;
     const y = activeViewBox.y + relY * activeViewBox.height;
 
     movePointTo(x, y);
-  }, [phase, activeViewBox.x, activeViewBox.y, activeViewBox.width, activeViewBox.height, movePointTo]);
+  }, [
+    phase,
+    activeImage.width,
+    activeImage.height,
+    activeViewBox.x,
+    activeViewBox.y,
+    activeViewBox.width,
+    activeViewBox.height,
+    movePointTo,
+  ]);
 
   const goBack = useCallback(() => {
     setError(null);
@@ -610,7 +636,7 @@ export default function LandmarkCalibrator({
           <svg
             className={styles.overlay}
             viewBox={`${viewBoxX} ${viewBoxY} ${viewBoxW} ${viewBoxH}`}
-            preserveAspectRatio="none"
+            preserveAspectRatio="xMidYMid meet"
           >
             <image href={activeImage.dataUrl} x="0" y="0" width={imageWidth} height={imageHeight} />
 

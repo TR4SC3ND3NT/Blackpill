@@ -54,7 +54,7 @@ function UploadTile({
 
       <div className="mt-4 rounded-xl border border-gray-200/50 bg-gradient-to-b from-gray-50 to-white overflow-hidden">
         <div className="p-3">
-          <div className="aspect-square w-full max-h-[360px] rounded-lg border border-gray-200/50 bg-white/60 grid place-items-center overflow-hidden">
+          <div className="aspect-square w-full max-w-[360px] max-h-[360px] mx-auto rounded-lg border border-gray-200/50 bg-white/60 grid place-items-center overflow-hidden">
             {dataUrl ? (
               <img
                 src={dataUrl}

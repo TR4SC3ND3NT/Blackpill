@@ -260,7 +260,7 @@ export function DashboardContent({ selectedId }: DashboardContentProps) {
           </div>
           <div className="mt-4">
             <Link
-              href="/"
+              href="/ui/new-analysis"
               className="inline-flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition-colors border border-gray-200"
             >
               Run analysis
