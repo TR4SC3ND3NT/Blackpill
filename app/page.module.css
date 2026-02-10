@@ -381,6 +381,16 @@
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
 }
 
+.choiceGridVertical {
+  grid-template-columns: 1fr;
+  max-width: 440px;
+  margin: 0 auto;
+}
+
+.choiceGridVertical .choiceButton {
+  width: 100%;
+}
+
 .choiceButton {
   border: 1px solid rgba(12, 24, 46, 0.12);
   border-radius: 16px;
