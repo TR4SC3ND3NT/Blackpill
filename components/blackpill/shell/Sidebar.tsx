@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { GlassPanel } from "@/components/blackpill/glass/GlassPanel";
 import type { AnalysisSnapshot } from "@/lib/analysisHistory";
 import { formatAgoShort, loadSnapshots, subscribeSnapshots } from "@/lib/analysisHistory";
 import {
@@ -63,9 +64,10 @@ export function Sidebar({ open, selectedId, onNavigate }: SidebarProps) {
   }, [history, selectedId, storedSelectedId]);
 
   return (
-    <aside
-      className="flex flex-col fixed top-0 bottom-0 left-0 z-50 bg-white w-[min(320px,100vw)] shadow-2xl transition-transform duration-300"
-      style={{ boxShadow: "none", transform: open ? "translateX(0)" : "translateX(-100%)" }}
+    <GlassPanel
+      as="aside"
+      className="flex flex-col fixed top-0 bottom-0 left-0 z-50 w-[min(320px,100vw)] transition-transform duration-300"
+      style={{ transform: open ? "translateX(0)" : "translateX(-100%)" }}
       aria-hidden={!open}
     >
       <div className="relative h-12 flex items-center px-3 flex-shrink-0">
@@ -291,7 +293,7 @@ export function Sidebar({ open, selectedId, onNavigate }: SidebarProps) {
           </div>
         </div>
       </div>
-    </aside>
+    </GlassPanel>
   );
 }
 

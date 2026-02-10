@@ -75,7 +75,7 @@ export function Footer() {
         </div>
 
         <a
-          href="https://discord.com/"
+          href="https://discord.gg/vmqgmrry8q"
           target="_blank"
           rel="noopener noreferrer"
           className="group inline-flex items-center gap-2 px-4 py-2 text-[13px] font-medium rounded-xl transition-all duration-300"

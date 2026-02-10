@@ -7,6 +7,7 @@ import { usePathname } from "next/navigation";
 import { LoadingOverlay } from "@/components/blackpill/LoadingOverlay";
 import { Footer } from "@/components/blackpill/shell/Footer";
 import { Sidebar } from "@/components/blackpill/shell/Sidebar";
+import { GlassPanel } from "@/components/blackpill/glass/GlassPanel";
 import { cn } from "@/lib/cn";
 import { saveSelectedAnalysisId } from "@/lib/uiSelectedAnalysis";
 
@@ -49,7 +50,7 @@ export function AppShell({
   }, [sidebarOpen]);
 
   return (
-    <div className="min-h-screen flex flex-col bg-neutral-50 relative">
+    <div className="min-h-screen flex flex-col bg-transparent relative">
       <Sidebar
         open={sidebarOpen}
         selectedId={selectedAnalysisId}
@@ -64,10 +65,10 @@ export function AppShell({
         />
       ) : null}
       <main
-        className="flex-1 bg-white flex flex-col min-h-0 transition-[margin] duration-300"
+        className="flex-1 bg-transparent flex flex-col min-h-0 transition-[margin] duration-300"
         style={{ marginLeft: sidebarOpen ? sidebarWidth : 0 }}
       >
-        <div className="flex-shrink-0 border-b border-gray-200/50 bg-white/80 backdrop-blur supports-[backdrop-filter]:bg-white/70">
+        <GlassPanel className="flex-shrink-0 bp-glass-header">
           <div className="max-w-7xl mx-auto px-6 h-[var(--bp-header-h)] flex items-center gap-3">
             <div className="flex items-center gap-2 min-w-0">
               <button
@@ -182,7 +183,7 @@ export function AppShell({
               </Link>
             </div>
           </div>
-        </div>
+        </GlassPanel>
 
         <div className="flex-1 min-h-0">{children}</div>
         <Footer />

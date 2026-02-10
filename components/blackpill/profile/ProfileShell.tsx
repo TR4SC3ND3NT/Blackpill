@@ -3,6 +3,7 @@
 import type * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { GlassPanel } from "@/components/blackpill/glass/GlassPanel";
 import { cn } from "@/lib/cn";
 
 type ProfileNavItem = {
@@ -31,8 +32,8 @@ export function ProfileShell({
   const pathname = usePathname();
 
   return (
-    <div className="min-h-screen bg-white">
-      <div className="bg-white">
+    <div className="min-h-screen bg-transparent">
+      <GlassPanel className="bp-glass-header">
         <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-4">
             <Link
@@ -83,7 +84,7 @@ export function ProfileShell({
             </button>
           </div>
         </div>
-      </div>
+      </GlassPanel>
 
       <main className="max-w-7xl mx-auto px-4 py-3 md:py-12">
         <div>
@@ -144,4 +145,3 @@ export function ProfileShell({
     </div>
   );
 }
-

@@ -28,9 +28,10 @@ export default function UiLayout({
   // inside a child that can use utilities.
   return (
     <div className={`bp ${manrope.variable}`}>
-      <div className="fixed inset-0 overflow-y-auto bg-neutral-50 text-gray-900 antialiased">
+      <div className="fixed inset-0 overflow-y-auto text-gray-900 antialiased">
+        <div className="bp-ui-bg" aria-hidden="true" />
         <UiSettingsApplier />
-        {children}
+        <div className="relative min-h-screen">{children}</div>
       </div>
     </div>
   );
