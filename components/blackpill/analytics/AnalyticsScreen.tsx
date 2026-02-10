@@ -29,12 +29,17 @@ const rangeLabel = (range: AnalyticsTimeRange) => {
 
 export function AnalyticsScreen() {
   const [snapshots, setSnapshots] = useState<AnalysisSnapshot[]>([]);
+  const [snapshotsReady, setSnapshotsReady] = useState(false);
   const [timeRange, setTimeRange] = useState<AnalyticsTimeRange>("30d");
 
   useEffect(() => {
-    const unsubscribe = subscribeSnapshots(() => setSnapshots(loadSnapshots()));
+    const load = () => {
+      setSnapshots(loadSnapshots());
+      setSnapshotsReady(true);
+    };
+    const unsubscribe = subscribeSnapshots(load);
     // Avoid hydration mismatch: load localStorage only after mount (async).
-    queueMicrotask(() => setSnapshots(loadSnapshots()));
+    queueMicrotask(load);
     return unsubscribe;
   }, []);
 
@@ -91,7 +96,83 @@ export function AnalyticsScreen() {
       rightSlot={<TimeRangeButtons value={timeRange} onChange={setTimeRange} />}
     >
       <div className="max-w-7xl mx-auto px-6 py-[var(--bp-content-py)] sm:py-[var(--bp-content-py-sm)]">
-        {!snapshots.length ? (
+        {!snapshotsReady ? (
+          <div className="space-y-6">
+            <section className="flex flex-col sm:flex-row gap-3">
+              {[0, 1, 2, 3].map((i) => (
+                <Card key={i} className="rounded-xl border-gray-200/50 p-4 flex-1">
+                  <div className="animate-pulse space-y-3">
+                    <div className="h-3 w-24 rounded bg-gray-900/10" />
+                    <div className="h-7 w-16 rounded bg-gray-900/10" />
+                    <div className="h-3 w-20 rounded bg-gray-900/10" />
+                  </div>
+                </Card>
+              ))}
+            </section>
+
+            <section className="flex flex-col lg:flex-row gap-4 lg:gap-8">
+              <div className="flex-1 min-w-0 space-y-4">
+                <Card className="rounded-xl border-gray-200/50 overflow-hidden">
+                  <div className="px-4 sm:px-6 py-4 border-b border-gray-100 flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <div className="h-3 w-24 rounded bg-gray-900/10 animate-pulse" />
+                      <div className="mt-2 h-2 w-44 rounded bg-gray-900/10 animate-pulse" />
+                    </div>
+                    <div className="h-6 w-24 rounded bg-gray-900/10 animate-pulse" />
+                  </div>
+                  <div className="px-4 sm:px-6 py-6">
+                    <div
+                      className="h-64 rounded-xl border border-gray-200/50 bg-gradient-to-b from-gray-50 to-white animate-pulse"
+                      style={{
+                        backgroundImage:
+                          "linear-gradient(to right, rgba(17, 24, 39, 0.04) 1px, transparent 1px), linear-gradient(to bottom, rgba(17, 24, 39, 0.04) 1px, transparent 1px)",
+                        backgroundSize: "48px 48px",
+                      }}
+                    />
+                  </div>
+                </Card>
+
+                <Card className="rounded-xl border-gray-200/50 overflow-hidden">
+                  <div className="px-4 sm:px-6 py-4 border-b border-gray-100">
+                    <div className="h-3 w-28 rounded bg-gray-900/10 animate-pulse" />
+                    <div className="mt-2 h-2 w-52 rounded bg-gray-900/10 animate-pulse" />
+                  </div>
+                  <div className="divide-y divide-gray-100">
+                    {[0, 1, 2, 3].map((k) => (
+                      <div key={k} className="px-4 sm:px-6 py-4 animate-pulse">
+                        <div className="flex items-center justify-between gap-4">
+                          <div className="h-3 w-40 rounded bg-gray-900/10" />
+                          <div className="h-3 w-12 rounded bg-gray-900/10" />
+                        </div>
+                        <div className="mt-2 h-2 w-56 rounded bg-gray-900/10" />
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              </div>
+
+              <aside className="w-full lg:w-[360px] flex-shrink-0 space-y-4">
+                {[0, 1, 2].map((j) => (
+                  <Card key={j} className="rounded-xl border-gray-200/50 p-4 sm:p-6">
+                    <div className="animate-pulse space-y-4">
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="h-3 w-28 rounded bg-gray-900/10" />
+                        <div className="h-6 w-16 rounded bg-gray-900/10" />
+                      </div>
+                      {[0, 1, 2].map((k) => (
+                        <div key={k} className="flex items-center justify-between gap-4">
+                          <div className="h-3 w-28 rounded bg-gray-900/10" />
+                          <div className="h-3 w-12 rounded bg-gray-900/10" />
+                        </div>
+                      ))}
+                      <div className="h-20 rounded-xl bg-gray-900/5" />
+                    </div>
+                  </Card>
+                ))}
+              </aside>
+            </section>
+          </div>
+        ) : !snapshots.length ? (
           <Card className="rounded-xl border-gray-200/50 p-6">
             <div className="text-sm font-medium text-gray-900">No analytics yet</div>
             <div className="mt-1 text-sm text-gray-600">

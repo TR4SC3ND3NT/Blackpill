@@ -17,12 +17,17 @@ export type SidebarProps = {
 
 export function Sidebar({ open, selectedId, onNavigate }: SidebarProps) {
   const [snapshots, setSnapshots] = useState<AnalysisSnapshot[]>([]);
+  const [snapshotsReady, setSnapshotsReady] = useState(false);
   const [storedSelectedId, setStoredSelectedId] = useState<string | null>(null);
 
   useEffect(() => {
-    const unsubscribe = subscribeSnapshots(() => setSnapshots(loadSnapshots()));
+    const load = () => {
+      setSnapshots(loadSnapshots());
+      setSnapshotsReady(true);
+    };
+    const unsubscribe = subscribeSnapshots(load);
     // Avoid hydration mismatch: load localStorage only after mount (async).
-    queueMicrotask(() => setSnapshots(loadSnapshots()));
+    queueMicrotask(load);
     return unsubscribe;
   }, []);
 
@@ -174,7 +179,25 @@ export function Sidebar({ open, selectedId, onNavigate }: SidebarProps) {
 
         <div className="flex-1 overflow-y-auto px-3 py-2">
           <div className="space-y-1">
-            {!history.length ? (
+            {!snapshotsReady ? (
+              <div className="space-y-1">
+                {[0, 1, 2].map((i) => (
+                  <div
+                    key={i}
+                    className="rounded-lg border border-transparent px-2 min-[375px]:px-3 py-2 min-[375px]:py-2.5"
+                  >
+                    <div className="animate-pulse flex items-center gap-2 min-[375px]:gap-3">
+                      <div className="ml-0.5 w-9 min-[375px]:w-11 h-9 min-[375px]:h-11 rounded-lg bg-gray-900/10" />
+                      <div className="flex-1 min-w-0">
+                        <div className="h-3 w-28 rounded bg-gray-900/10" />
+                        <div className="mt-2 h-2 w-40 rounded bg-gray-900/10" />
+                      </div>
+                      <div className="w-10 h-6 rounded bg-gray-900/10" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : !history.length ? (
               <div className="px-2 py-3 text-xs text-gray-500">No analyses yet.</div>
             ) : null}
 

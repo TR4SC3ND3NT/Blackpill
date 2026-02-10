@@ -20,12 +20,17 @@ export type DashboardContentProps = {
 
 export function DashboardContent({ selectedId }: DashboardContentProps) {
   const [snapshots, setSnapshots] = useState<AnalysisSnapshot[]>([]);
+  const [snapshotsReady, setSnapshotsReady] = useState(false);
   const [storedSelectedId, setStoredSelectedId] = useState<string | null>(null);
 
   useEffect(() => {
-    const unsubscribe = subscribeSnapshots(() => setSnapshots(loadSnapshots()));
+    const load = () => {
+      setSnapshots(loadSnapshots());
+      setSnapshotsReady(true);
+    };
+    const unsubscribe = subscribeSnapshots(load);
     // Avoid hydration mismatch: load localStorage only after mount (async).
-    queueMicrotask(() => setSnapshots(loadSnapshots()));
+    queueMicrotask(load);
     return unsubscribe;
   }, []);
 
@@ -142,6 +147,108 @@ export function DashboardContent({ selectedId }: DashboardContentProps) {
       cohortLabel,
     };
   }, [effectiveSelectedId, snapshots]);
+
+  if (!snapshotsReady) {
+    return (
+      <div className="max-w-7xl mx-auto px-6 py-[var(--bp-content-py)] sm:py-[var(--bp-content-py-sm)]">
+        <div className="space-y-6">
+          <section className="flex flex-col sm:flex-row gap-3">
+            {[0, 1, 2, 3].map((i) => (
+              <Card key={i} className="rounded-xl border-gray-200/50 p-4 flex-1">
+                <div className="animate-pulse space-y-3">
+                  <div className="h-3 w-24 rounded bg-gray-900/10" />
+                  <div className="h-7 w-16 rounded bg-gray-900/10" />
+                  <div className="h-3 w-20 rounded bg-gray-900/10" />
+                </div>
+              </Card>
+            ))}
+          </section>
+
+          <section className="flex flex-col lg:flex-row gap-4 lg:gap-8">
+            <div className="flex-1 min-w-0 space-y-4">
+              <Card className="rounded-xl border-gray-200/50 p-4 sm:p-6">
+                <div className="animate-pulse space-y-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="h-4 w-32 rounded bg-gray-900/10" />
+                    <div className="h-9 w-24 rounded bg-gray-900/10" />
+                  </div>
+                  <div className="h-10 w-24 rounded bg-gray-900/10" />
+                  <div className="h-3 w-2/3 rounded bg-gray-900/10" />
+                  <div className="space-y-3 pt-2">
+                    {[0, 1, 2, 3].map((j) => (
+                      <div key={j} className="flex items-center gap-3">
+                        <div className="h-3 w-20 rounded bg-gray-900/10" />
+                        <div className="h-2 flex-1 rounded bg-gray-900/10" />
+                        <div className="h-3 w-8 rounded bg-gray-900/10" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </Card>
+
+              <Card className="rounded-xl border-gray-200/50 overflow-hidden">
+                <div className="px-4 sm:px-6 py-4 border-b border-gray-100 flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="h-3 w-24 rounded bg-gray-900/10 animate-pulse" />
+                    <div className="mt-2 h-2 w-44 rounded bg-gray-900/10 animate-pulse" />
+                  </div>
+                  <div className="h-6 w-24 rounded bg-gray-900/10 animate-pulse" />
+                </div>
+                <div className="px-4 sm:px-6 py-6">
+                  <div
+                    className="h-48 rounded-xl border border-gray-200/50 bg-gradient-to-b from-gray-50 to-white animate-pulse"
+                    style={{
+                      backgroundImage:
+                        "linear-gradient(to right, rgba(17, 24, 39, 0.04) 1px, transparent 1px), linear-gradient(to bottom, rgba(17, 24, 39, 0.04) 1px, transparent 1px)",
+                      backgroundSize: "48px 48px",
+                    }}
+                  />
+                </div>
+              </Card>
+
+              <Card className="rounded-xl border-gray-200/50 overflow-hidden">
+                <div className="px-4 sm:px-6 py-4 border-b border-gray-100">
+                  <div className="h-3 w-32 rounded bg-gray-900/10 animate-pulse" />
+                  <div className="mt-2 h-2 w-52 rounded bg-gray-900/10 animate-pulse" />
+                </div>
+                <div className="divide-y divide-gray-100">
+                  {[0, 1, 2].map((k) => (
+                    <div key={k} className="px-4 sm:px-6 py-4 animate-pulse">
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="h-3 w-56 rounded bg-gray-900/10" />
+                        <div className="h-3 w-16 rounded bg-gray-900/10" />
+                      </div>
+                      <div className="mt-2 h-2 w-44 rounded bg-gray-900/10" />
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            </div>
+
+            <aside className="w-full lg:w-[360px] flex-shrink-0 space-y-4">
+              {[0, 1].map((i) => (
+                <Card key={i} className="rounded-xl border-gray-200/50 p-4 sm:p-6">
+                  <div className="animate-pulse space-y-4">
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="h-3 w-28 rounded bg-gray-900/10" />
+                      <div className="h-6 w-16 rounded bg-gray-900/10" />
+                    </div>
+                    {[0, 1, 2].map((j) => (
+                      <div key={j} className="flex items-center justify-between gap-4">
+                        <div className="h-3 w-24 rounded bg-gray-900/10" />
+                        <div className="h-3 w-20 rounded bg-gray-900/10" />
+                      </div>
+                    ))}
+                    <div className="h-9 w-32 rounded bg-gray-900/10" />
+                  </div>
+                </Card>
+              ))}
+            </aside>
+          </section>
+        </div>
+      </div>
+    );
+  }
 
   if (!snapshots.length) {
     return (

@@ -61,23 +61,33 @@ const badgeVariant = (status: ReportExportStatus): "neutral" | "success" | "dang
 
 export function ReportsScreen() {
   const [snapshots, setSnapshots] = useState<AnalysisSnapshot[]>([]);
+  const [snapshotsReady, setSnapshotsReady] = useState(false);
   const [reports, setReports] = useState<ReportExport[]>([]);
+  const [reportsReady, setReportsReady] = useState(false);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<ReportExportStatus | "">("");
   const [selectedAnalysisId, setSelectedAnalysisId] = useState<string>("");
   const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
 
   useEffect(() => {
-    const unsubscribe = subscribeSnapshots(() => setSnapshots(loadSnapshots()));
+    const load = () => {
+      setSnapshots(loadSnapshots());
+      setSnapshotsReady(true);
+    };
+    const unsubscribe = subscribeSnapshots(load);
     // Avoid hydration mismatch: load localStorage only after mount (async).
-    queueMicrotask(() => setSnapshots(loadSnapshots()));
+    queueMicrotask(load);
     return unsubscribe;
   }, []);
 
   useEffect(() => {
-    const unsubscribe = subscribeReportExports(() => setReports(loadReportExports()));
+    const load = () => {
+      setReports(loadReportExports());
+      setReportsReady(true);
+    };
+    const unsubscribe = subscribeReportExports(load);
     // Avoid hydration mismatch: load localStorage only after mount (async).
-    queueMicrotask(() => setReports(loadReportExports()));
+    queueMicrotask(load);
     return unsubscribe;
   }, []);
 
@@ -288,7 +298,52 @@ export function ReportsScreen() {
       }
     >
       <div className="max-w-7xl mx-auto px-6 py-[var(--bp-content-py)] sm:py-[var(--bp-content-py-sm)]">
-        <div className="space-y-6">
+        {!snapshotsReady || !reportsReady ? (
+          <div className="space-y-6">
+            <Card className="rounded-xl border-gray-200/50 p-4 sm:p-6">
+              <div className="animate-pulse space-y-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="h-3 w-24 rounded bg-gray-900/10" />
+                  <div className="h-3 w-20 rounded bg-gray-900/10" />
+                </div>
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <div className="h-10 w-full sm:w-64 rounded bg-gray-900/10" />
+                  <div className="h-10 w-full sm:w-44 rounded bg-gray-900/10" />
+                  <div className="h-10 w-full sm:w-56 rounded bg-gray-900/10" />
+                </div>
+              </div>
+            </Card>
+
+            <Card className="rounded-xl border-gray-200/50 overflow-hidden">
+              <div className="px-4 sm:px-6 py-4 border-b border-gray-100 flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="h-3 w-28 rounded bg-gray-900/10 animate-pulse" />
+                  <div className="mt-2 h-2 w-44 rounded bg-gray-900/10 animate-pulse" />
+                </div>
+                <div className="h-6 w-20 rounded bg-gray-900/10 animate-pulse" />
+              </div>
+              <div className="p-4 sm:p-6">
+                <div className="animate-pulse space-y-3">
+                  {[0, 1, 2, 3, 4].map((i) => (
+                    <div key={i} className="flex items-center justify-between gap-4">
+                      <div className="h-3 w-56 rounded bg-gray-900/10" />
+                      <div className="h-3 w-20 rounded bg-gray-900/10" />
+                    </div>
+                  ))}
+                  <div className="h-10 rounded bg-gray-900/5" />
+                </div>
+              </div>
+            </Card>
+
+            <Card className="rounded-xl border-gray-200/50 p-4 sm:p-6">
+              <div className="animate-pulse space-y-3">
+                <div className="h-3 w-28 rounded bg-gray-900/10" />
+                <div className="h-2 w-2/3 rounded bg-gray-900/10" />
+              </div>
+            </Card>
+          </div>
+        ) : (
+          <div className="space-y-6">
           <Card className="rounded-xl border-gray-200/50 p-4 sm:p-6">
             <div className="flex flex-col lg:flex-row gap-3 lg:items-center lg:justify-between">
               <div className="flex-1 min-w-0">
@@ -507,7 +562,8 @@ export function ReportsScreen() {
               <Badge className="bg-gray-50 text-gray-600">Local</Badge>
             </div>
           </Card>
-        </div>
+          </div>
+        )}
       </div>
     </AppShell>
   );
