@@ -1,10 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { Avatar } from "@/components/blackpill/Avatar";
 import { useEffect, useMemo, useState } from "react";
 import type { AnalysisSnapshot } from "@/lib/analysisHistory";
-import { clearSnapshots, deleteSnapshot, formatAgoShort, loadSnapshots, subscribeSnapshots } from "@/lib/analysisHistory";
+import { formatAgoShort, loadSnapshots, subscribeSnapshots } from "@/lib/analysisHistory";
+import {
+  loadSelectedAnalysisId,
+  subscribeSelectedAnalysisId,
+} from "@/lib/uiSelectedAnalysis";
 
 export type SidebarProps = {
   open: boolean;
@@ -14,11 +17,21 @@ export type SidebarProps = {
 
 export function Sidebar({ open, selectedId, onNavigate }: SidebarProps) {
   const [snapshots, setSnapshots] = useState<AnalysisSnapshot[]>([]);
+  const [storedSelectedId, setStoredSelectedId] = useState<string | null>(null);
 
   useEffect(() => {
     const unsubscribe = subscribeSnapshots(() => setSnapshots(loadSnapshots()));
     // Avoid hydration mismatch: load localStorage only after mount (async).
     queueMicrotask(() => setSnapshots(loadSnapshots()));
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = subscribeSelectedAnalysisId(() =>
+      setStoredSelectedId(loadSelectedAnalysisId()),
+    );
+    // Avoid hydration mismatch: load localStorage only after mount (async).
+    queueMicrotask(() => setStoredSelectedId(loadSelectedAnalysisId()));
     return unsubscribe;
   }, []);
 
@@ -40,8 +53,9 @@ export function Sidebar({ open, selectedId, onNavigate }: SidebarProps) {
   const activeId = useMemo(() => {
     if (!history.length) return null;
     if (selectedId && history.some((h) => h.id === selectedId)) return selectedId;
+    if (storedSelectedId && history.some((h) => h.id === storedSelectedId)) return storedSelectedId;
     return history[0]?.id ?? null;
-  }, [history, selectedId]);
+  }, [history, selectedId, storedSelectedId]);
 
   return (
     <aside
@@ -61,13 +75,6 @@ export function Sidebar({ open, selectedId, onNavigate }: SidebarProps) {
         <div className="relative overflow-hidden px-3 pt-3 rounded-xl border border-gray-100 pb-3">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 bg-gray-200 rounded-lg flex items-center justify-center overflow-hidden flex-shrink-0 relative">
-              <Avatar
-                shape="square"
-                size="md"
-                src={null}
-                fallback="B"
-                className="relative z-10 w-full h-full bg-transparent"
-              />
               <span
                 className="text-sm font-medium text-gray-600 absolute inset-0 flex items-center justify-center z-0"
                 style={{ display: "flex" }}
@@ -76,12 +83,12 @@ export function Sidebar({ open, selectedId, onNavigate }: SidebarProps) {
               </span>
             </div>
 
-          <div className="flex-1 text-left min-w-0">
-            <div className="text-sm font-medium text-gray-900 leading-tight truncate">
+            <div className="flex-1 text-left min-w-0">
+              <div className="text-sm font-medium text-gray-900 leading-tight truncate">
                 Blackpill User
+              </div>
+              <div className="text-xs text-gray-500 leading-tight mt-0.5">Free</div>
             </div>
-            <div className="text-xs text-gray-500 leading-tight mt-0.5">Free</div>
-          </div>
 
             <div>
               <button
@@ -162,42 +169,6 @@ export function Sidebar({ open, selectedId, onNavigate }: SidebarProps) {
                 <path d="M12 5v14"></path>
               </svg>
             </Link>
-            <button
-              type="button"
-              disabled={!history.length}
-              onClick={() => {
-                if (!history.length) return;
-                if (!window.confirm("Clear analysis history? This removes saved snapshots from this browser.")) return;
-                clearSnapshots();
-              }}
-              className={[
-                "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors border",
-                history.length
-                  ? "text-gray-600 hover:text-gray-900 hover:bg-gray-200 border-gray-300"
-                  : "text-gray-400 border-gray-200 bg-gray-50 cursor-not-allowed",
-              ].join(" ")}
-            >
-              Clear
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="24"
-                height="24"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="lucide lucide-trash-2 h-3.5 w-3.5"
-                aria-hidden="true"
-              >
-                <path d="M3 6h18" />
-                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
-                <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                <path d="M10 11v6" />
-                <path d="M14 11v6" />
-              </svg>
-            </button>
           </div>
         </div>
 
@@ -211,83 +182,70 @@ export function Sidebar({ open, selectedId, onNavigate }: SidebarProps) {
               const isActive = activeId ? item.id === activeId : idx === 0;
 
               return (
-                <div key={item.id} className="group relative">
-                  <Link
-                    href={`/ui/dashboard/${item.id}`}
-                    onClick={onNavigate}
-                    className={[
-                      "relative w-full flex items-center gap-2 min-[375px]:gap-3 px-2 min-[375px]:px-3 py-2 min-[375px]:py-2.5 rounded-lg border transition-all pr-10",
-                      isActive
-                        ? "bg-white/80 border-gray-200/50 text-gray-900"
-                        : "border-transparent text-gray-600 hover:bg-white/80 hover:border-gray-200/50 hover:text-gray-900",
-                    ].join(" ")}
-                    aria-current={isActive ? "page" : undefined}
-                  >
-                    <div
-                      className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-9 rounded-r-full transition-all"
-                      style={{
-                        background: isActive ? "rgb(17 24 39)" : "rgb(209 213 219)",
-                        opacity: isActive ? 0.9 : 0.6,
-                      }}
-                    />
-
-                    <div className="ml-0.5 w-9 min-[375px]:w-11 h-9 min-[375px]:h-11 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden transition-all bg-gray-200 group-hover:bg-gray-100">
-                      {item.thumbnailUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={item.thumbnailUrl}
-                          alt={`Analysis ${item.id}`}
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
-                        <span className="text-xs font-semibold text-gray-500">BP</span>
-                      )}
-                    </div>
-
-                    <div className="flex-1 flex flex-col justify-center min-w-0">
-                      <div className="flex items-center gap-1.5 min-[375px]:gap-2 mb-1 min-[375px]:mb-1.5">
-                        <span
-                          className="text-[9px] min-[375px]:text-[10px] font-semibold px-1 min-[375px]:px-1.5 py-0.5 rounded-md"
-                          style={{
-                            background: "transparent",
-                            color: "#72838c",
-                            letterSpacing: "0.05em",
-                            border: "1px dashed rgba(114, 131, 140, 0.3)",
-                          }}
-                        >
-                          <span className="hidden min-[375px]:inline">OVERALL</span>
-                          <span className="min-[375px]:hidden">OVR</span>
-                        </span>
-                        <span className="text-xs min-[375px]:text-sm font-medium leading-none text-gray-900">
-                          {item.overall}
-                        </span>
-                        <span className="text-[10px] leading-none text-gray-400">{item.createdAtLabel}</span>
-                      </div>
-
-                      <div className="flex items-center gap-1.5 min-[375px]:gap-3">
-                        <PillStat label="H" value={item.harmony} />
-                        <PillStat label="A" value={item.angularity} dashed />
-                        <PillStat label="D" value={item.dimorphism} dashed />
-                        <PillStat label="F" value={item.features} dashed />
-                      </div>
-                    </div>
-                  </Link>
-
-                  <button
-                    type="button"
-                    aria-label={`Delete analysis ${item.id}`}
-                    className={[
-                      "absolute right-2 top-1/2 -translate-y-1/2 inline-flex items-center justify-center h-8 w-8 rounded-md border border-gray-200 bg-white text-gray-500 transition-all",
-                      "opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100 hover:text-gray-700 hover:bg-gray-100",
-                    ].join(" ")}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      if (!window.confirm(`Delete analysis snapshot ${item.id} from this browser?`)) return;
-                      deleteSnapshot(item.id);
+                <Link
+                  key={item.id}
+                  href={`/ui/dashboard/${item.id}`}
+                  onClick={onNavigate}
+                  className={[
+                    "group relative w-full flex items-center gap-2 min-[375px]:gap-3 px-2 min-[375px]:px-3 py-2 min-[375px]:py-2.5 rounded-lg border transition-all",
+                    isActive
+                      ? "bg-white/80 border-gray-200/50 text-gray-900"
+                      : "border-transparent text-gray-600 hover:bg-white/80 hover:border-gray-200/50 hover:text-gray-900",
+                  ].join(" ")}
+                  aria-current={isActive ? "page" : undefined}
+                >
+                  <div
+                    className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-9 rounded-r-full transition-all"
+                    style={{
+                      background: isActive ? "rgb(17 24 39)" : "rgb(209 213 219)",
+                      opacity: isActive ? 0.9 : 0.6,
                     }}
-                    title="Delete snapshot"
-                  >
+                  />
+
+                  <div className="ml-0.5 w-9 min-[375px]:w-11 h-9 min-[375px]:h-11 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden transition-all bg-gray-200 group-hover:bg-gray-100">
+                    {item.thumbnailUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={item.thumbnailUrl}
+                        alt={`Analysis ${item.id}`}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <span className="text-xs font-semibold text-gray-500">BP</span>
+                    )}
+                  </div>
+
+                  <div className="flex-1 flex flex-col justify-center min-w-0">
+                    <div className="flex items-center gap-1.5 min-[375px]:gap-2 mb-1 min-[375px]:mb-1.5">
+                      <span
+                        className="text-[9px] min-[375px]:text-[10px] font-semibold px-1 min-[375px]:px-1.5 py-0.5 rounded-md"
+                        style={{
+                          background: "transparent",
+                          color: "#72838c",
+                          letterSpacing: "0.05em",
+                          border: "1px dashed rgba(114, 131, 140, 0.3)",
+                        }}
+                      >
+                        <span className="hidden min-[375px]:inline">OVERALL</span>
+                        <span className="min-[375px]:hidden">OVR</span>
+                      </span>
+                      <span className="text-xs min-[375px]:text-sm font-medium leading-none text-gray-900 tabular-nums">
+                        {item.overall}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 min-[375px]:gap-3">
+                      <PillStat label="H" value={item.harmony} />
+                      <PillStat label="A" value={item.angularity} dashed />
+                      <PillStat label="D" value={item.dimorphism} dashed />
+                      <PillStat label="F" value={item.features} dashed />
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col items-center justify-center gap-1 min-[375px]:gap-1.5 flex-shrink-0 ml-0.5 min-[375px]:ml-1">
+                    <span className="text-[8px] min-[375px]:text-[9px] text-gray-400/80 leading-none font-medium whitespace-nowrap">
+                      {item.createdAtLabel}
+                    </span>
                     <svg
                       xmlns="http://www.w3.org/2000/svg"
                       width="24"
@@ -298,14 +256,13 @@ export function Sidebar({ open, selectedId, onNavigate }: SidebarProps) {
                       strokeWidth="2"
                       strokeLinecap="round"
                       strokeLinejoin="round"
-                      className="lucide lucide-x h-4 w-4"
+                      className="lucide lucide-chevron-right w-3 min-[375px]:w-3.5 h-3 min-[375px]:h-3.5 text-gray-400 transition-all opacity-60 -translate-x-1 group-hover:opacity-100 group-hover:translate-x-0"
                       aria-hidden="true"
                     >
-                      <path d="M18 6 6 18" />
-                      <path d="M6 6l12 12" />
+                      <path d="m9 18 6-6-6-6" />
                     </svg>
-                  </button>
-                </div>
+                  </div>
+                </Link>
               );
             })}
           </div>
@@ -328,7 +285,10 @@ function PillStat({ label, value, dashed }: { label: string; value: number; dash
       >
         {label}
       </span>
-      <span className="text-[10px] min-[375px]:text-xs font-medium leading-none text-gray-500">
+      <span
+        className="text-[10px] min-[375px]:text-xs font-medium leading-none tabular-nums"
+        style={dashed ? { color: "rgba(114, 131, 140, 0.4)" } : { color: "rgb(156, 163, 175)" }}
+      >
         {value.toFixed(1)}
       </span>
     </div>

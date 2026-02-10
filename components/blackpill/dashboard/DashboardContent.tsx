@@ -8,6 +8,11 @@ import { LineAreaChart } from "@/components/blackpill/charts/LineAreaChart";
 import type { AnalysisSnapshot } from "@/lib/analysisHistory";
 import { formatAgoShort, loadSnapshots, subscribeSnapshots } from "@/lib/analysisHistory";
 import { cn } from "@/lib/cn";
+import {
+  loadSelectedAnalysisId,
+  saveSelectedAnalysisId,
+  subscribeSelectedAnalysisId,
+} from "@/lib/uiSelectedAnalysis";
 
 export type DashboardContentProps = {
   selectedId?: string;
@@ -15,6 +20,7 @@ export type DashboardContentProps = {
 
 export function DashboardContent({ selectedId }: DashboardContentProps) {
   const [snapshots, setSnapshots] = useState<AnalysisSnapshot[]>([]);
+  const [storedSelectedId, setStoredSelectedId] = useState<string | null>(null);
 
   useEffect(() => {
     const unsubscribe = subscribeSnapshots(() => setSnapshots(loadSnapshots()));
@@ -23,10 +29,28 @@ export function DashboardContent({ selectedId }: DashboardContentProps) {
     return unsubscribe;
   }, []);
 
+  useEffect(() => {
+    const unsubscribe = subscribeSelectedAnalysisId(() =>
+      setStoredSelectedId(loadSelectedAnalysisId()),
+    );
+    // Avoid hydration mismatch: load localStorage only after mount (async).
+    queueMicrotask(() => setStoredSelectedId(loadSelectedAnalysisId()));
+    return unsubscribe;
+  }, []);
+
   const effectiveSelectedId = useMemo(() => {
     if (selectedId && snapshots.some((s) => s.id === selectedId)) return selectedId;
+    if (storedSelectedId && snapshots.some((s) => s.id === storedSelectedId)) return storedSelectedId;
     return snapshots[0]?.id ?? null;
-  }, [selectedId, snapshots]);
+  }, [selectedId, snapshots, storedSelectedId]);
+
+  useEffect(() => {
+    // For /ui/dashboard (no route param), keep the last selected analysis sticky across /ui pages.
+    if (selectedId) return;
+    if (!effectiveSelectedId) return;
+    if (storedSelectedId === effectiveSelectedId) return;
+    saveSelectedAnalysisId(effectiveSelectedId);
+  }, [effectiveSelectedId, selectedId, storedSelectedId]);
 
   const { history, kpis, series, selected, cohortLabel } = useMemo(() => {
     if (!snapshots.length) {

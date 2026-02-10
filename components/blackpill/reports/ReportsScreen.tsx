@@ -10,6 +10,7 @@ import type { ReportExport, ReportExportStatus } from "@/lib/reportHistory";
 import { addReportExport, clearReportExports, loadReportExports, subscribeReportExports } from "@/lib/reportHistory";
 import { buildSnapshotReportPayload, snapshotMetricsToCsv } from "@/lib/snapshotExport";
 import { cn } from "@/lib/cn";
+import { loadSelectedAnalysisId, subscribeSelectedAnalysisId } from "@/lib/uiSelectedAnalysis";
 
 const downloadText = (fileName: string, contents: string, type: string) => {
   const blob = new Blob([contents], { type });
@@ -77,6 +78,17 @@ export function ReportsScreen() {
     const unsubscribe = subscribeReportExports(() => setReports(loadReportExports()));
     // Avoid hydration mismatch: load localStorage only after mount (async).
     queueMicrotask(() => setReports(loadReportExports()));
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    const apply = () => {
+      const id = loadSelectedAnalysisId();
+      setSelectedAnalysisId((prev) => (prev ? prev : id ?? ""));
+    };
+    const unsubscribe = subscribeSelectedAnalysisId(apply);
+    // Avoid hydration mismatch: load localStorage only after mount (async).
+    queueMicrotask(apply);
     return unsubscribe;
   }, []);
 

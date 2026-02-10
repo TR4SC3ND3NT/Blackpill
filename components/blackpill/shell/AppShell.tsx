@@ -8,6 +8,7 @@ import { LoadingOverlay } from "@/components/blackpill/LoadingOverlay";
 import { Footer } from "@/components/blackpill/shell/Footer";
 import { Sidebar } from "@/components/blackpill/shell/Sidebar";
 import { cn } from "@/lib/cn";
+import { saveSelectedAnalysisId } from "@/lib/uiSelectedAnalysis";
 
 export type AppShellProps = {
   children: React.ReactNode;
@@ -29,6 +30,12 @@ export function AppShell({
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const sidebarWidth = "min(320px, 100vw)";
+
+  useEffect(() => {
+    if (!selectedAnalysisId) return;
+    // Persist selection so other /ui pages can derive from the same "current analysis".
+    saveSelectedAnalysisId(selectedAnalysisId);
+  }, [selectedAnalysisId]);
 
   useEffect(() => {
     if (!sidebarOpen) return;
