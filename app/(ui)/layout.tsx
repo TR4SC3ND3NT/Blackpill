@@ -15,12 +15,16 @@ export default function UiLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  // RootLayout wraps everything in a centered container; we render the UI
-  // clone as a full-viewport layer so it can't affect the existing flow.
+  // RootLayout wraps everything in a centered container and applies a dark theme.
+  // Tailwind is scoped via `important: ".bp"` so utilities won't apply on the `.bp`
+  // element itself. We keep `.bp` as the scope root and render the actual UI
+  // inside a child that can use utilities.
   return (
-    <div className="bp fixed inset-0 overflow-y-auto bg-neutral-50 text-gray-900 antialiased">
-      <UiSettingsApplier />
-      {children}
+    <div className="bp">
+      <div className="fixed inset-0 overflow-y-auto bg-neutral-50 text-gray-900 antialiased">
+        <UiSettingsApplier />
+        {children}
+      </div>
     </div>
   );
 }
