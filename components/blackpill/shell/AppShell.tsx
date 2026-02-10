@@ -61,7 +61,7 @@ export function AppShell({
         style={{ marginLeft: sidebarOpen ? sidebarWidth : 0 }}
       >
         <div className="flex-shrink-0 border-b border-gray-200/50 bg-white">
-          <div className="max-w-7xl mx-auto px-6 h-[var(--bp-header-h)] flex items-center justify-between gap-3">
+          <div className="max-w-7xl mx-auto px-6 h-[var(--bp-header-h)] flex items-center gap-3">
             <div className="flex items-center gap-2 min-w-0">
               <button
                 type="button"
@@ -116,24 +116,25 @@ export function AppShell({
               </div>
             </div>
 
+            <nav className="hidden md:flex flex-1 items-center justify-center gap-3 md:gap-6">
+              <HeaderNavLink href="/ui/dashboard" pathname={pathname}>
+                Dashboard
+              </HeaderNavLink>
+              <HeaderNavLink href="/ui/analytics" pathname={pathname}>
+                Analytics
+              </HeaderNavLink>
+              <HeaderNavLink href="/ui/reports" pathname={pathname}>
+                Reports
+              </HeaderNavLink>
+              <HeaderNavLink href="/ui/settings" pathname={pathname}>
+                Settings
+              </HeaderNavLink>
+              <HeaderNavLink href="/ui/profile" pathname={pathname}>
+                Profile
+              </HeaderNavLink>
+            </nav>
+
             <div className="flex items-center gap-2">
-              <nav className="hidden md:flex items-center gap-1">
-                <HeaderNavLink href="/ui/dashboard" pathname={pathname}>
-                  Dashboard
-                </HeaderNavLink>
-                <HeaderNavLink href="/ui/analytics" pathname={pathname}>
-                  Analytics
-                </HeaderNavLink>
-                <HeaderNavLink href="/ui/reports" pathname={pathname}>
-                  Reports
-                </HeaderNavLink>
-                <HeaderNavLink href="/ui/settings" pathname={pathname}>
-                  Settings
-                </HeaderNavLink>
-                <HeaderNavLink href="/ui/profile" pathname={pathname}>
-                  Profile
-                </HeaderNavLink>
-              </nav>
 
               <nav className="flex md:hidden items-center gap-1">
                 <HeaderNavLink href="/ui/dashboard" pathname={pathname}>
