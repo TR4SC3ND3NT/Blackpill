@@ -10,7 +10,7 @@ export type TimeRangeButtonsProps = {
 
 export function TimeRangeButtons({ value, onChange }: TimeRangeButtonsProps) {
   return (
-    <div className="inline-flex items-center rounded-md border border-gray-200 bg-white p-0.5">
+    <div className="inline-flex items-center rounded-xl border border-gray-200 bg-white p-0.5">
       {ANALYTICS_TIME_RANGES.map((range) => {
         const active = range === value;
         return (
@@ -18,7 +18,7 @@ export function TimeRangeButtons({ value, onChange }: TimeRangeButtonsProps) {
             key={range}
             type="button"
             className={cn(
-              "px-2.5 py-1 text-xs font-medium rounded-md transition-colors",
+              "px-3 py-1.5 text-xs font-medium rounded-lg transition-colors tabular-nums",
               active ? "bg-gray-900 text-white" : "text-gray-600 hover:bg-gray-100",
             )}
             onClick={() => onChange(range)}

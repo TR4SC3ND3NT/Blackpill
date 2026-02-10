@@ -152,9 +152,9 @@ export function DashboardContent({ selectedId }: DashboardContentProps) {
     return (
       <div className="max-w-7xl mx-auto px-6 py-[var(--bp-content-py)] sm:py-[var(--bp-content-py-sm)]">
         <div className="space-y-6">
-          <section className="flex flex-col sm:flex-row gap-3">
+          <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             {[0, 1, 2, 3].map((i) => (
-              <Card key={i} className="rounded-xl border-gray-200/50 p-4 flex-1">
+              <Card key={i} className="rounded-xl border-gray-200/50 p-4">
                 <div className="animate-pulse space-y-3">
                   <div className="h-3 w-24 rounded bg-gray-900/10" />
                   <div className="h-7 w-16 rounded bg-gray-900/10" />
@@ -292,7 +292,7 @@ export function DashboardContent({ selectedId }: DashboardContentProps) {
   return (
     <div className="max-w-7xl mx-auto px-6 py-[var(--bp-content-py)] sm:py-[var(--bp-content-py-sm)]">
       <div className="space-y-6">
-        <section className="flex flex-col sm:flex-row gap-3">
+        <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <KpiCard
             label="Avg Overall"
             value={`${kpis.overallAvg}`}
@@ -543,7 +543,7 @@ function KpiCard({
   badge?: string;
 }) {
   return (
-    <Card className="rounded-xl border-gray-200/50 p-4 flex-1">
+    <Card className="rounded-xl border-gray-200/50 p-4">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="text-xs font-medium text-gray-500 uppercase tracking-wider">{label}</div>

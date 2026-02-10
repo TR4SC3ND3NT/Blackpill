@@ -67,7 +67,7 @@ export function AppShell({
         className="flex-1 bg-white flex flex-col min-h-0 transition-[margin] duration-300"
         style={{ marginLeft: sidebarOpen ? sidebarWidth : 0 }}
       >
-        <div className="flex-shrink-0 border-b border-gray-200/50 bg-white">
+        <div className="flex-shrink-0 border-b border-gray-200/50 bg-white/80 backdrop-blur supports-[backdrop-filter]:bg-white/70">
           <div className="max-w-7xl mx-auto px-6 h-[var(--bp-header-h)] flex items-center gap-3">
             <div className="flex items-center gap-2 min-w-0">
               <button
@@ -159,7 +159,7 @@ export function AppShell({
 
               <Link
                 href="/"
-                className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition-colors border border-gray-200"
+                className="inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition-colors border border-gray-200"
               >
                 <span className="hidden sm:inline">New analysis</span>
                 <span className="sm:hidden">New</span>
@@ -207,10 +207,10 @@ function HeaderNavLink({
     <Link
       href={href}
       className={cn(
-        "inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md transition-colors",
+        "inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-xl transition-colors",
         isActive
           ? "text-gray-700 bg-gray-100 hover:bg-gray-200"
-          : "text-gray-500 hover:text-gray-700 hover:bg-gray-100",
+          : "text-gray-600 hover:text-gray-700 hover:bg-gray-100",
       )}
       aria-current={isActive ? "page" : undefined}
     >
