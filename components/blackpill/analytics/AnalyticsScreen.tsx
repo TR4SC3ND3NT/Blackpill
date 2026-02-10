@@ -122,10 +122,10 @@ export function AnalyticsScreen() {
                   </div>
                   <div className="px-4 sm:px-6 py-6">
                     <div
-                      className="h-64 rounded-xl border border-gray-200/50 bg-gradient-to-b from-gray-50 to-white animate-pulse"
+                      className="h-64 rounded-2xl border border-white/45 bg-white/40 supports-[backdrop-filter]:backdrop-blur-sm animate-pulse"
                       style={{
                         backgroundImage:
-                          "linear-gradient(to right, rgba(17, 24, 39, 0.04) 1px, transparent 1px), linear-gradient(to bottom, rgba(17, 24, 39, 0.04) 1px, transparent 1px)",
+                          "linear-gradient(to right, rgba(15, 23, 42, 0.06) 1px, transparent 1px), linear-gradient(to bottom, rgba(15, 23, 42, 0.06) 1px, transparent 1px)",
                         backgroundSize: "48px 48px",
                       }}
                     />
@@ -236,6 +236,11 @@ export function AnalyticsScreen() {
                         points={analytics.seriesOverall.slice(-60)}
                         height={256}
                         valueLabel="Overall"
+                        bands={[
+                          { from: 0, to: 60, color: "#ef4444", opacity: 0.08, label: "Low" },
+                          { from: 60, to: 75, color: "#f59e0b", opacity: 0.07, label: "Mid" },
+                          { from: 75, to: 100, color: "#22c55e", opacity: 0.07, label: "High" },
+                        ]}
                       />
                       <div className="flex items-center justify-between">
                         <div className="text-xs text-gray-500">

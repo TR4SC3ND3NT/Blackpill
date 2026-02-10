@@ -8,23 +8,36 @@ export type LineAreaPoint = {
   value: number;
 };
 
+export type LineAreaBand = {
+  from: number;
+  to: number;
+  color: string;
+  opacity?: number;
+  label?: string;
+};
+
 export type LineAreaChartProps = {
   points: LineAreaPoint[];
   height?: number;
   domain?: [number, number];
   className?: string;
-  gridSize?: number;
   curve?: "linear" | "smooth";
   showAxes?: boolean;
   showTooltip?: boolean;
   valueLabel?: string;
+  bands?: LineAreaBand[];
 };
 
 const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
 
 const formatShortDate = (iso: string) => {
   try {
-    return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "2-digit" });
+    // Explicit timezone for stable hydration output.
+    return new Intl.DateTimeFormat("en-US", {
+      month: "short",
+      day: "2-digit",
+      timeZone: "UTC",
+    }).format(new Date(iso));
   } catch {
     return iso;
   }
@@ -35,11 +48,11 @@ export function LineAreaChart({
   height = 256,
   domain = [0, 100],
   className,
-  gridSize = 48,
   curve = "smooth",
   showAxes = true,
   showTooltip = true,
   valueLabel = "Overall",
+  bands,
 }: LineAreaChartProps) {
   const ref = useRef<HTMLDivElement | null>(null);
   const fillId = useId();
@@ -51,30 +64,33 @@ export function LineAreaChart({
     const n = points.length;
     if (!n) return null;
 
-    const w = 640;
-    const h = 220;
-    const pad = 16;
-    const innerW = w - pad * 2;
-    const innerH = h - pad * 2;
+    const w = 720;
+    const h = 260;
+    const padLeft = showAxes ? 52 : 18;
+    const padRight = 16;
+    const padTop = 18;
+    const padBottom = showAxes ? 40 : 18;
+    const innerW = w - padLeft - padRight;
+    const innerH = h - padTop - padBottom;
 
     const [minV, maxV] = domain;
     const span = Math.max(1e-6, maxV - minV);
 
     const toY = (value: number) => {
       const pct = clamp((value - minV) / span, 0, 1);
-      return pad + innerH - pct * innerH;
+      return padTop + innerH - pct * innerH;
     };
 
     const xs = new Array<number>(n);
     const ys = new Array<number>(n);
     for (let i = 0; i < n; i += 1) {
-      const x = pad + (n === 1 ? innerW : (i / (n - 1)) * innerW);
+      const x = padLeft + (n === 1 ? innerW / 2 : (i / (n - 1)) * innerW);
       xs[i] = x;
       ys[i] = toY(points[i]?.value ?? minV);
     }
 
     const mkSmoothD = () => {
-      if (n === 1) return `M ${pad} ${ys[0]} L ${pad + innerW} ${ys[0]}`;
+      if (n === 1) return `M ${padLeft} ${ys[0]} L ${padLeft + innerW} ${ys[0]}`;
       const parts: string[] = [];
       parts.push(`M ${xs[0]} ${ys[0]}`);
 
@@ -100,16 +116,38 @@ export function LineAreaChart({
     };
 
     const mkLinearD = () => {
-      if (n === 1) return `M ${pad} ${ys[0]} L ${pad + innerW} ${ys[0]}`;
+      if (n === 1) return `M ${padLeft} ${ys[0]} L ${padLeft + innerW} ${ys[0]}`;
       return xs.map((x, i) => `${i === 0 ? "M" : "L"} ${x} ${ys[i]}`).join(" ");
     };
 
     const lineD = curve === "linear" ? mkLinearD() : mkSmoothD();
 
-    const areaD = `${lineD} L ${pad + innerW} ${pad + innerH} L ${pad} ${pad + innerH} Z`;
+    const areaD = `${lineD} L ${padLeft + innerW} ${padTop + innerH} L ${padLeft} ${padTop + innerH} Z`;
 
-    return { w, h, pad, innerW, innerH, xs, ys, lineD, areaD, count: n };
-  }, [curve, domain, points]);
+    const ticks = 5;
+    const yTicks = new Array<number>(ticks).fill(0).map((_, i) => {
+      const pct = i / (ticks - 1);
+      return minV + (maxV - minV) * pct;
+    });
+
+    return {
+      w,
+      h,
+      padLeft,
+      padRight,
+      padTop,
+      padBottom,
+      innerW,
+      innerH,
+      xs,
+      ys,
+      lineD,
+      areaD,
+      count: n,
+      toY,
+      yTicks,
+    };
+  }, [curve, domain, points, showAxes]);
 
   const onMove: React.MouseEventHandler<HTMLDivElement> = (event) => {
     if (!showTooltip) return;
@@ -122,8 +160,8 @@ export function LineAreaChart({
     const xRel = clamp((event.clientX - rect.left) / rect.width, 0, 1);
     const idx = clamp(Math.round(xRel * Math.max(0, model.count - 1)), 0, model.count - 1);
 
-    const x = model.xs[idx] ?? model.pad;
-    const y = model.ys[idx] ?? model.pad;
+    const x = model.xs[idx] ?? model.padLeft;
+    const y = model.ys[idx] ?? model.padTop;
     const xPx = (x / model.w) * rect.width;
     const yPx = (y / model.h) * rect.height;
 
@@ -143,15 +181,10 @@ export function LineAreaChart({
     <div
       ref={ref}
       className={cn(
-        "relative rounded-xl border border-gray-200/50 bg-gradient-to-b from-gray-50 to-white overflow-hidden",
+        "relative overflow-hidden rounded-2xl border border-white/45 bg-white/40 supports-[backdrop-filter]:backdrop-blur-sm",
         className,
       )}
-      style={{
-        height,
-        backgroundImage:
-          "linear-gradient(to right, rgba(17, 24, 39, 0.04) 1px, transparent 1px), linear-gradient(to bottom, rgba(17, 24, 39, 0.04) 1px, transparent 1px)",
-        backgroundSize: `${gridSize}px ${gridSize}px`,
-      }}
+      style={{ height }}
       onMouseMove={onMove}
       onMouseLeave={onLeave}
       role="img"
@@ -168,16 +201,87 @@ export function LineAreaChart({
             >
               <defs>
                 <linearGradient id={fillId} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="rgba(17, 24, 39, 0.16)" />
-                  <stop offset="100%" stopColor="rgba(17, 24, 39, 0.02)" />
+                  <stop offset="0%" stopColor="rgba(15, 23, 42, 0.18)" />
+                  <stop offset="100%" stopColor="rgba(15, 23, 42, 0.02)" />
                 </linearGradient>
               </defs>
+
+              <g>
+                <circle
+                  cx={model.padLeft}
+                  cy={12}
+                  r={4}
+                  fill="rgba(15, 23, 42, 0.66)"
+                />
+                <text
+                  x={model.padLeft + 10}
+                  y={15}
+                  fontSize="11"
+                  fill="rgba(15, 23, 42, 0.62)"
+                >
+                  {valueLabel}
+                </text>
+              </g>
+
+              {bands?.length
+                ? bands.map((band, i) => {
+                    const y1 = model.toY(band.to);
+                    const y2 = model.toY(band.from);
+                    const y = Math.min(y1, y2);
+                    const h = Math.abs(y2 - y1);
+                    return (
+                      <rect
+                        key={`${band.from}:${band.to}:${i}`}
+                        x={model.padLeft}
+                        y={y}
+                        width={model.innerW}
+                        height={h}
+                        fill={band.color}
+                        fillOpacity={band.opacity ?? 1}
+                      />
+                    );
+                  })
+                : null}
+
+              {showAxes ? (
+                <>
+                  {model.yTicks.map((t) => {
+                    const y = model.toY(t);
+                    return (
+                      <line
+                        key={t}
+                        x1={model.padLeft}
+                        x2={model.padLeft + model.innerW}
+                        y1={y}
+                        y2={y}
+                        stroke="rgba(15, 23, 42, 0.08)"
+                        strokeWidth="1"
+                      />
+                    );
+                  })}
+                  {[0, 1, 2, 3, 4].map((i) => {
+                    const x =
+                      model.padLeft + (i / 4) * model.innerW;
+                    return (
+                      <line
+                        key={i}
+                        x1={x}
+                        x2={x}
+                        y1={model.padTop}
+                        y2={model.padTop + model.innerH}
+                        stroke="rgba(15, 23, 42, 0.06)"
+                        strokeWidth="1"
+                      />
+                    );
+                  })}
+                </>
+              ) : null}
 
               <path d={model.areaD} fill={`url(#${fillId})`} />
               <path
                 d={model.lineD}
                 fill="none"
-                stroke="rgba(17, 24, 39, 0.6)"
+                stroke="rgba(15, 23, 42, 0.64)"
                 strokeWidth="2.5"
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -188,9 +292,9 @@ export function LineAreaChart({
                   <line
                     x1={hoveredX}
                     x2={hoveredX}
-                    y1={model.pad}
-                    y2={model.pad + model.innerH}
-                    stroke="rgba(17, 24, 39, 0.12)"
+                    y1={model.padTop}
+                    y2={model.padTop + model.innerH}
+                    stroke="rgba(15, 23, 42, 0.14)"
                     strokeWidth="2"
                   />
                   <circle
@@ -198,31 +302,51 @@ export function LineAreaChart({
                     cy={hoveredY}
                     r="5"
                     fill="white"
-                    stroke="rgba(17, 24, 39, 0.7)"
+                    stroke="rgba(15, 23, 42, 0.7)"
                     strokeWidth="2"
                   />
                 </>
               ) : null}
+
+              {showAxes ? (
+                <>
+                  {model.yTicks.map((t) => {
+                    const y = model.toY(t);
+                    return (
+                      <text
+                        key={`t:${t}`}
+                        x={model.padLeft - 10}
+                        y={y + 3}
+                        textAnchor="end"
+                        fontSize="10"
+                        fill="rgba(15, 23, 42, 0.42)"
+                      >
+                        {Math.round(t)}
+                      </text>
+                    );
+                  })}
+                  <text
+                    x={model.padLeft}
+                    y={model.padTop + model.innerH + 26}
+                    textAnchor="start"
+                    fontSize="10"
+                    fill="rgba(15, 23, 42, 0.42)"
+                  >
+                    {startLabel}
+                  </text>
+                  <text
+                    x={model.padLeft + model.innerW}
+                    y={model.padTop + model.innerH + 26}
+                    textAnchor="end"
+                    fontSize="10"
+                    fill="rgba(15, 23, 42, 0.42)"
+                  >
+                    {endLabel}
+                  </text>
+                </>
+              ) : null}
             </svg>
           </div>
-
-          {showAxes ? (
-            <>
-              <div className="absolute left-3 top-3 text-[10px] text-gray-400 tabular-nums">
-                {domain[1]}
-              </div>
-              <div className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] text-gray-400 tabular-nums">
-                {Math.round((domain[0] + domain[1]) / 2)}
-              </div>
-              <div className="absolute left-3 bottom-3 text-[10px] text-gray-400 tabular-nums">
-                {domain[0]}
-              </div>
-              <div className="absolute left-10 right-3 bottom-3 flex items-center justify-between text-[10px] text-gray-400">
-                <span>{startLabel}</span>
-                <span>{endLabel}</span>
-              </div>
-            </>
-          ) : null}
 
           {showTooltip && hovered && hoveredPoint ? (
             <div
@@ -233,8 +357,10 @@ export function LineAreaChart({
                 transform: "translate(-50%, calc(-100% - 10px))",
               }}
             >
-              <div className="rounded-lg border border-gray-200 bg-white px-2.5 py-2 shadow-sm">
-                <div className="text-[10px] font-medium text-gray-500">{formatShortDate(hoveredPoint.t)}</div>
+              <div className="bp-glass-panel rounded-xl px-3 py-2">
+                <div className="text-[10px] font-medium text-gray-600">
+                  {formatShortDate(hoveredPoint.t)}
+                </div>
                 <div className="mt-0.5 text-xs font-semibold text-gray-900 tabular-nums">
                   {valueLabel}: {Math.round(hoveredPoint.value)}
                 </div>
