@@ -31,7 +31,8 @@
 
 .stage {
   position: relative;
-  width: 100%;
+  width: min(100%, 700px);
+  margin: 0 auto;
   border-radius: 12px;
   overflow: hidden;
   border: 1px solid rgba(12, 24, 46, 0.12);
@@ -54,20 +55,26 @@
 .pointPending {
   fill: rgba(255, 102, 102, 0.88);
   stroke: rgba(255, 255, 255, 0.92);
-  stroke-width: 0.001;
+  stroke-width: 2;
 }
 
 .pointConfirmed {
   fill: rgba(49, 194, 108, 0.9);
   stroke: rgba(255, 255, 255, 0.95);
-  stroke-width: 0.001;
+  stroke-width: 2;
 }
 
 .pointActive {
   fill: #ef4444;
   stroke: #b91c1c;
-  stroke-width: 0.0016;
+  stroke-width: 3;
   filter: drop-shadow(0 2px 4px rgba(185, 28, 28, 0.35));
+}
+
+.pointPending,
+.pointConfirmed,
+.pointActive {
+  vector-effect: non-scaling-stroke;
 }
 
 .stageFooter {
@@ -183,21 +190,21 @@
 
 .referencePreviewStatic {
   position: relative;
-  height: 220px;
+  aspect-ratio: 993 / 734;
   border-radius: 12px;
   background: #dfe2e8;
   margin: 12px;
   border: 1px solid rgba(12, 24, 46, 0.1);
+  overflow: hidden;
   display: grid;
   place-items: center;
 }
 
 .referenceImg {
-  width: auto;
-  max-width: 280px;
-  height: auto;
-  max-height: 100%;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
+  display: block;
 }
 
 .howToWrap {

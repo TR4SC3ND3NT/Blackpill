@@ -109,13 +109,20 @@ const computeBBox = (points: Array<{ x: number; y: number }>): BBox | null => {
   };
 };
 
-const fitWithPadding = (bbox: BBox, padding: number): ViewBox => {
+const fitSquareWithPadding = (bbox: BBox, padding: number): ViewBox => {
   const pad = clamp(padding, 0.04, 0.22);
-  const width = clamp(bbox.width + pad * 2, 0.2, 1);
-  const height = clamp(bbox.height + pad * 2, 0.2, 1);
-  const x = clamp(bbox.minX - pad, 0, 1 - width);
-  const y = clamp(bbox.minY - pad, 0, 1 - height);
-  return { x, y, width, height };
+  const size = clamp(Math.max(bbox.width, bbox.height) + pad * 2, 0.2, 1);
+
+  const half = size / 2;
+  const cx = clamp((bbox.minX + bbox.maxX) / 2, half, 1 - half);
+  const cy = clamp((bbox.minY + bbox.maxY) / 2, half, 1 - half);
+
+  return {
+    x: clamp(cx - half, 0, 1 - size),
+    y: clamp(cy - half, 0, 1 - size),
+    width: size,
+    height: size,
+  };
 };
 
 const smartFaceViewBox = (params: {
@@ -127,8 +134,9 @@ const smartFaceViewBox = (params: {
   const bbox = computeBBox(normalized);
   if (!bbox) return { x: 0, y: 0, width: 1, height: 1 };
   // Pad so the face fills ~70-80% of the viewport.
-  const padding = bbox.height * 0.15;
-  return fitWithPadding(bbox, padding);
+  const padding = Math.max(bbox.width, bbox.height) * 0.15;
+  // Use a square viewBox in normalized space so the rendered view keeps the photo's aspect ratio.
+  return fitSquareWithPadding(bbox, padding);
 };
 
 const hasLowConfidenceWarning = (point: ManualLandmarkPoint) => {
@@ -547,9 +555,17 @@ export default function LandmarkCalibrator({
         ? "Review your finalized SIDE landmarks. Continue only when this looks correct."
         : "";
 
+  const imageWidthForRadius = Math.max(1, activeImage.width);
   const pointRadius = isStepPhase(phase)
-    ? Math.max(0.00042, activeViewBox.width * 0.00145)
-    : 0.00095;
+    ? Math.max(0.00042, activeViewBox.width * 0.00145) * imageWidthForRadius
+    : 0.00095 * imageWidthForRadius;
+
+  const imageWidth = Math.max(1, activeImage.width);
+  const imageHeight = Math.max(1, activeImage.height);
+  const viewBoxX = activeViewBox.x * imageWidth;
+  const viewBoxY = activeViewBox.y * imageHeight;
+  const viewBoxW = activeViewBox.width * imageWidth;
+  const viewBoxH = activeViewBox.height * imageHeight;
 
   const canGoPreviousPoint =
     phase === "front_steps"
@@ -593,15 +609,15 @@ export default function LandmarkCalibrator({
         >
           <svg
             className={styles.overlay}
-            viewBox={`${activeViewBox.x} ${activeViewBox.y} ${activeViewBox.width} ${activeViewBox.height}`}
+            viewBox={`${viewBoxX} ${viewBoxY} ${viewBoxW} ${viewBoxH}`}
             preserveAspectRatio="none"
           >
-            <image href={activeImage.dataUrl} x="0" y="0" width="1" height="1" preserveAspectRatio="none" />
+            <image href={activeImage.dataUrl} x="0" y="0" width={imageWidth} height={imageHeight} />
 
             {isStepPhase(phase) && activePoint ? (
               <circle
-                cx={activePoint.x}
-                cy={activePoint.y}
+                cx={activePoint.x * imageWidth}
+                cy={activePoint.y * imageHeight}
                 r={pointRadius * 1.5}
                 className={styles.pointActive}
               />
@@ -611,8 +627,8 @@ export default function LandmarkCalibrator({
               ? pointsForCurrentView.map((point) => (
                   <circle
                     key={point.id}
-                    cx={point.x}
-                    cy={point.y}
+                    cx={point.x * imageWidth}
+                    cy={point.y * imageHeight}
                     r={pointRadius}
                     className={point.confirmed ? styles.pointConfirmed : styles.pointPending}
                   />
