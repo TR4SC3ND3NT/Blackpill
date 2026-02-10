@@ -57,7 +57,7 @@
 }
 
 .homeLayout {
-  max-width: 1280px;
+  max-width: 1440px;
   margin: 0 auto;
   padding: 0 24px;
   display: grid;
@@ -67,7 +67,8 @@
 
 @media (min-width: 1024px) {
   .homeLayout {
-    grid-template-columns: 280px minmax(0, 1fr);
+    grid-template-columns: 240px minmax(0, 1fr);
+    column-gap: 44px;
   }
 }
 
