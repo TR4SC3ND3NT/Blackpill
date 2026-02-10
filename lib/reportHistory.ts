@@ -71,6 +71,22 @@ export function addReportExport(report: ReportExport): void {
   window.dispatchEvent(new Event(EVENT_NAME));
 }
 
+export function saveReportExport(report: ReportExport): void {
+  if (!isBrowser()) return;
+  const current = loadReportExports();
+  const idx = current.findIndex((r) => r.id === report.id);
+  const next =
+    idx >= 0
+      ? [...current.slice(0, idx), report, ...current.slice(idx + 1)]
+      : [report, ...current];
+  const limited = next
+    .sort((a, b) => (b.createdAtIso || "").localeCompare(a.createdAtIso || ""))
+    .slice(0, MAX_REPORTS);
+
+  window.localStorage.setItem(LS_KEY, JSON.stringify(limited));
+  window.dispatchEvent(new Event(EVENT_NAME));
+}
+
 export function deleteReportExport(id: string): void {
   if (!isBrowser()) return;
   if (!id) return;

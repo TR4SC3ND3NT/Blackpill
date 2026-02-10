@@ -7,7 +7,7 @@ import { AppShell } from "@/components/blackpill/shell/AppShell";
 import type { AnalysisSnapshot } from "@/lib/analysisHistory";
 import { formatAgoShort, loadSnapshots, subscribeSnapshots } from "@/lib/analysisHistory";
 import type { ReportExport, ReportExportStatus } from "@/lib/reportHistory";
-import { addReportExport, clearReportExports, loadReportExports, subscribeReportExports } from "@/lib/reportHistory";
+import { clearReportExports, loadReportExports, saveReportExport, subscribeReportExports } from "@/lib/reportHistory";
 import { buildSnapshotReportPayload, snapshotMetricsToCsv } from "@/lib/snapshotExport";
 import { cn } from "@/lib/cn";
 import { loadSelectedAnalysisId, subscribeSelectedAnalysisId } from "@/lib/uiSelectedAnalysis";
@@ -121,29 +121,56 @@ export function ReportsScreen() {
     if (!snap) return;
 
     const exportedAtIso = new Date().toISOString();
+    const exportId = `rpt_${format}_${analysisId}_${exportedAtIso}`;
     const fileName =
       format === "csv"
         ? `blackpill-metrics-${analysisId}.csv`
         : `blackpill-report-${analysisId}.json`;
 
-    if (format === "csv") {
-      const csv = snapshotMetricsToCsv(snap);
-      downloadText(fileName, csv, "text/csv");
-    } else {
-      const payload = buildSnapshotReportPayload(snap, exportedAtIso);
-      downloadText(fileName, JSON.stringify(payload, null, 2), "application/json");
-    }
-
     if (track) {
-      addReportExport({
-        id: `rpt_${format}_${analysisId}_${exportedAtIso}`,
+      saveReportExport({
+        id: exportId,
         createdAtIso: exportedAtIso,
         analysisId,
         cohortKey: snap.cohortKey ?? null,
         overall: Math.round(snap.overall),
-        status: "Complete",
+        status: "Queued",
         fileName,
       });
+    }
+
+    try {
+      if (format === "csv") {
+        const csv = snapshotMetricsToCsv(snap);
+        downloadText(fileName, csv, "text/csv");
+      } else {
+        const payload = buildSnapshotReportPayload(snap, exportedAtIso);
+        downloadText(fileName, JSON.stringify(payload, null, 2), "application/json");
+      }
+
+      if (track) {
+        saveReportExport({
+          id: exportId,
+          createdAtIso: exportedAtIso,
+          analysisId,
+          cohortKey: snap.cohortKey ?? null,
+          overall: Math.round(snap.overall),
+          status: "Complete",
+          fileName,
+        });
+      }
+    } catch {
+      if (track) {
+        saveReportExport({
+          id: exportId,
+          createdAtIso: exportedAtIso,
+          analysisId,
+          cohortKey: snap.cohortKey ?? null,
+          overall: Math.round(snap.overall),
+          status: "Failed",
+          fileName,
+        });
+      }
     }
   };
 
@@ -356,7 +383,9 @@ export function ReportsScreen() {
                 <tbody className="divide-y divide-gray-100">
                   {visibleReports.length ? (
                     visibleReports.map((row) => {
-                      const canDownload = Boolean(snapshots.find((s) => s.id === row.analysisId));
+                      const hasSource = Boolean(snapshots.find((s) => s.id === row.analysisId));
+                      const canDownload = row.status === "Complete" && hasSource;
+                      const canView = hasSource;
                       const format: ExportFormat = row.fileName.toLowerCase().endsWith(".csv") ? "csv" : "json";
                       return (
                         <tr key={row.id} className="hover:bg-gray-50 transition-colors">
@@ -382,37 +411,75 @@ export function ReportsScreen() {
                             <Badge variant={badgeVariant(row.status)}>{row.status}</Badge>
                           </td>
                           <td className="px-4 sm:px-6 py-4 text-right">
-                            <button
-                              type="button"
-                              disabled={!canDownload}
-                              onClick={() => exportSnapshot(row.analysisId, format, false)}
-                              className={cn(
-                                "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors border",
-                                canDownload
-                                  ? "text-gray-600 hover:text-gray-900 hover:bg-gray-100 border-gray-200"
-                                  : "text-gray-400 border-gray-200 bg-gray-50 cursor-not-allowed",
-                              )}
-                              title={canDownload ? "Download again" : "Source analysis no longer available"}
-                            >
-                              Download
-                              <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                width="24"
-                                height="24"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                className="lucide lucide-download h-4 w-4"
-                                aria-hidden="true"
+                            <div className="flex items-center justify-end gap-2">
+                              <a
+                                href={canView ? `/results/${row.analysisId}` : undefined}
+                                className={cn(
+                                  "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors border",
+                                  canView
+                                    ? "text-gray-600 hover:text-gray-900 hover:bg-gray-100 border-gray-200"
+                                    : "text-gray-400 border-gray-200 bg-gray-50 cursor-not-allowed pointer-events-none",
+                                )}
+                                title={canView ? "Open results" : "Source analysis no longer available"}
                               >
-                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                                <path d="M7 10l5 5 5-5" />
-                                <path d="M12 15V3" />
-                              </svg>
-                            </button>
+                                View
+                                <svg
+                                  xmlns="http://www.w3.org/2000/svg"
+                                  width="24"
+                                  height="24"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  className="lucide lucide-external-link h-4 w-4"
+                                  aria-hidden="true"
+                                >
+                                  <path d="M15 3h6v6" />
+                                  <path d="M10 14 21 3" />
+                                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                                </svg>
+                              </a>
+
+                              <button
+                                type="button"
+                                disabled={!canDownload}
+                                onClick={() => exportSnapshot(row.analysisId, format, false)}
+                                className={cn(
+                                  "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors border",
+                                  canDownload
+                                    ? "text-gray-600 hover:text-gray-900 hover:bg-gray-100 border-gray-200"
+                                    : "text-gray-400 border-gray-200 bg-gray-50 cursor-not-allowed",
+                                )}
+                                title={
+                                  canDownload
+                                    ? "Download again"
+                                    : row.status === "Queued"
+                                      ? "Export still queued"
+                                      : "Source analysis not available"
+                                }
+                              >
+                                Download
+                                <svg
+                                  xmlns="http://www.w3.org/2000/svg"
+                                  width="24"
+                                  height="24"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  className="lucide lucide-download h-4 w-4"
+                                  aria-hidden="true"
+                                >
+                                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                  <path d="M7 10l5 5 5-5" />
+                                  <path d="M12 15V3" />
+                                </svg>
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       );
