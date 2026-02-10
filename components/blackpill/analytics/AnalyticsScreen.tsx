@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/blackpill/Badge";
 import { Card } from "@/components/blackpill/Card";
 import { TimeRangeButtons } from "@/components/blackpill/analytics/TimeRangeButtons";
+import { LineAreaChart } from "@/components/blackpill/charts/LineAreaChart";
 import { AppShell } from "@/components/blackpill/shell/AppShell";
 import type { AnalysisSnapshot } from "@/lib/analysisHistory";
 import { loadSnapshots, subscribeSnapshots } from "@/lib/analysisHistory";
@@ -83,47 +84,6 @@ export function AnalyticsScreen() {
     return counts.map((c) => Math.round((c / peak) * 64));
   }, [values]);
 
-  const lineModel = useMemo(() => {
-    const points = analytics.seriesOverall.slice(-60);
-    const n = points.length;
-    if (!n) return null;
-
-    const w = 640;
-    const h = 220;
-    const pad = 14;
-    const innerW = w - pad * 2;
-    const innerH = h - pad * 2;
-
-    const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
-    const toY = (value: number) => {
-      const pct = clamp01(value / 100);
-      return pad + innerH - pct * innerH;
-    };
-
-    const xs = new Array<number>(n);
-    const ys = new Array<number>(n);
-    for (let i = 0; i < n; i += 1) {
-      const x = pad + (n === 1 ? innerW : (i / (n - 1)) * innerW);
-      xs[i] = x;
-      ys[i] = toY(points[i]?.value ?? 0);
-    }
-
-    const lineD =
-      n === 1
-        ? `M ${pad} ${ys[0]} L ${pad + innerW} ${ys[0]}`
-        : xs.map((x, i) => `${i === 0 ? "M" : "L"} ${x} ${ys[i]}`).join(" ");
-
-    const areaD =
-      n === 1
-        ? `${lineD} L ${pad + innerW} ${pad + innerH} L ${pad} ${pad + innerH} Z`
-        : `${lineD} L ${pad + innerW} ${pad + innerH} L ${pad} ${pad + innerH} Z`;
-
-    const lastX = n === 1 ? pad + innerW : xs[n - 1];
-    const lastY = ys[n - 1];
-
-    return { w, h, lineD, areaD, lastX, lastY, count: n };
-  }, [analytics.seriesOverall]);
-
   return (
     <AppShell
       title="Analytics"
@@ -132,7 +92,7 @@ export function AnalyticsScreen() {
     >
       <div className="max-w-7xl mx-auto px-6 py-[var(--bp-content-py)] sm:py-[var(--bp-content-py-sm)]">
         {!snapshots.length ? (
-          <Card className="rounded-xl border-gray-200/60 p-6">
+          <Card className="rounded-xl border-gray-200/50 p-6">
             <div className="text-sm font-medium text-gray-900">No analytics yet</div>
             <div className="mt-1 text-sm text-gray-600">
               Run an analysis to generate snapshot history for trends.
@@ -178,7 +138,7 @@ export function AnalyticsScreen() {
 
             <section className="flex flex-col lg:flex-row gap-4 lg:gap-8">
               <div className="flex-1 min-w-0 space-y-4">
-                <Card className="rounded-xl border-gray-200/60 overflow-hidden">
+                <Card className="rounded-xl border-gray-200/50 overflow-hidden">
                   <div className="px-4 sm:px-6 py-4 border-b border-gray-100 flex items-start justify-between gap-4">
                     <div className="min-w-0">
                       <div className="text-sm font-medium text-gray-900">Overall trend</div>
@@ -190,62 +150,23 @@ export function AnalyticsScreen() {
                   </div>
 
                   <div className="px-4 sm:px-6 py-6">
-                    <div className="rounded-xl border border-gray-200/60 bg-gradient-to-b from-gray-50 to-white overflow-hidden">
-                    <div
-                      className="h-64 relative"
-                      style={{
-                        backgroundImage:
-                          "linear-gradient(to right, rgba(17, 24, 39, 0.04) 1px, transparent 1px), linear-gradient(to bottom, rgba(17, 24, 39, 0.04) 1px, transparent 1px)",
-                        backgroundSize: "48px 48px",
-                      }}
-                    >
-                      {lineModel ? (
-                        <div className="absolute inset-0 p-4">
-                          <svg
-                            viewBox={`0 0 ${lineModel.w} ${lineModel.h}`}
-                            className="w-full h-full"
-                            preserveAspectRatio="none"
-                            role="img"
-                            aria-label="Overall trend line chart"
-                          >
-                            <defs>
-                              <linearGradient id="bp-analytics-fill" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="0%" stopColor="rgba(17, 24, 39, 0.18)" />
-                                <stop offset="100%" stopColor="rgba(17, 24, 39, 0.02)" />
-                              </linearGradient>
-                            </defs>
-                            <path d={lineModel.areaD} fill="url(#bp-analytics-fill)" />
-                            <path
-                              d={lineModel.lineD}
-                              fill="none"
-                              stroke="rgba(17, 24, 39, 0.55)"
-                              strokeWidth="2.5"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            />
-                            <circle
-                              cx={lineModel.lastX}
-                              cy={lineModel.lastY}
-                              r="5"
-                              fill="white"
-                              stroke="rgba(17, 24, 39, 0.65)"
-                              strokeWidth="2"
-                            />
-                          </svg>
+                    <div className="space-y-3">
+                      <LineAreaChart
+                        points={analytics.seriesOverall.slice(-60)}
+                        height={256}
+                        valueLabel="Overall"
+                      />
+                      <div className="flex items-center justify-between">
+                        <div className="text-xs text-gray-500">
+                          Active cohort: {analytics.cohortLabel ?? "—"}
                         </div>
-                      ) : null}
-                    </div>
-                    <div className="px-4 py-3 flex items-center justify-between">
-                      <div className="text-xs text-gray-500">
-                        Active cohort: {analytics.cohortLabel ?? "—"}
-                      </div>
                         <div className="text-xs text-gray-500">Blackpill</div>
                       </div>
                     </div>
                   </div>
                 </Card>
 
-                <Card className="rounded-xl border-gray-200/60 overflow-hidden">
+                <Card className="rounded-xl border-gray-200/50 overflow-hidden">
                   <div className="px-4 sm:px-6 py-4 border-b border-gray-100 flex items-start justify-between gap-4">
                     <div className="min-w-0">
                       <div className="text-sm font-medium text-gray-900">Breakdown</div>
@@ -278,7 +199,7 @@ export function AnalyticsScreen() {
               </div>
 
               <aside className="w-full lg:w-[360px] flex-shrink-0 space-y-4">
-                <Card className="rounded-xl border-gray-200/60 p-4 sm:p-6">
+                <Card className="rounded-xl border-gray-200/50 p-4 sm:p-6">
                   <div className="flex items-start justify-between gap-4">
                     <div className="min-w-0">
                       <div className="text-sm font-medium text-gray-900">Top strengths</div>
@@ -304,7 +225,7 @@ export function AnalyticsScreen() {
                   </div>
                 </Card>
 
-                <Card className="rounded-xl border-gray-200/60 p-4 sm:p-6">
+                <Card className="rounded-xl border-gray-200/50 p-4 sm:p-6">
                   <div className="flex items-start justify-between gap-4">
                     <div className="min-w-0">
                       <div className="text-sm font-medium text-gray-900">Top weaknesses</div>
@@ -330,14 +251,14 @@ export function AnalyticsScreen() {
                   </div>
                 </Card>
 
-                <Card className="rounded-xl border-gray-200/60 p-4 sm:p-6">
+                <Card className="rounded-xl border-gray-200/50 p-4 sm:p-6">
                   <div className="flex items-start justify-between gap-4">
                     <div className="min-w-0">
                       <div className="text-sm font-medium text-gray-900">Distribution</div>
                       <div className="mt-1 text-xs text-gray-500">Overall distribution within range.</div>
                     </div>
                   </div>
-                  <div className="mt-4 rounded-xl border border-gray-200/60 bg-gradient-to-b from-gray-50 to-white p-4">
+                  <div className="mt-4 rounded-xl border border-gray-200/50 bg-gradient-to-b from-gray-50 to-white p-4">
                     <div className="flex items-end gap-2 h-20">
                       {(histogram ?? [18, 34, 52, 41, 28, 20]).map((h, i) => (
                         <div key={i} className="flex-1 min-w-0">
@@ -368,7 +289,7 @@ function KpiCard({
   badge?: string;
 }) {
   return (
-    <Card className="rounded-xl border-gray-200/60 p-4 flex-1">
+    <Card className="rounded-xl border-gray-200/50 p-4 flex-1">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="text-xs font-medium text-gray-500 uppercase tracking-wider">{label}</div>

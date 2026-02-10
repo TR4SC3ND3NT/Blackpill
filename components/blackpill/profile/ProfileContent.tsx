@@ -80,10 +80,10 @@ export function ProfileContent() {
                     key={t.id}
                     type="button"
                     className={cn(
-                      "px-4 py-2 text-sm font-medium rounded-lg transition-colors whitespace-nowrap border",
+                      "px-4 py-2 text-sm font-medium rounded-lg transition-colors whitespace-nowrap",
                       isActive
-                        ? "bg-gray-900 text-white border-gray-900"
-                        : "text-gray-600 hover:bg-gray-100 border-gray-200",
+                        ? "bg-black text-white"
+                        : "text-gray-600 hover:bg-gray-100 border border-gray-200",
                     )}
                     onClick={() => setActive(t.id)}
                     aria-pressed={isActive}
@@ -95,7 +95,7 @@ export function ProfileContent() {
             </div>
           </nav>
 
-          <aside className="hidden lg:block w-52 flex-shrink-0">
+          <aside className="hidden lg:block w-48 flex-shrink-0">
             <nav className="space-y-1">
               {tabs.map((t) => {
                 const isActive = t.id === active;
@@ -105,7 +105,7 @@ export function ProfileContent() {
                     type="button"
                     className={cn(
                       "block w-full text-left px-4 py-2 text-sm font-medium rounded-lg transition-colors",
-                      isActive ? "bg-gray-900 text-white" : "text-gray-600 hover:bg-gray-100",
+                      isActive ? "bg-black text-white" : "text-gray-600 hover:bg-gray-100",
                     )}
                     onClick={() => setActive(t.id)}
                     aria-current={isActive ? "page" : undefined}
@@ -139,36 +139,70 @@ export function ProfileContent() {
 function AccountTab() {
   return (
     <div className="space-y-6">
-      <Card className="rounded-xl border-gray-200/60 p-4 sm:p-6">
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <div className="text-sm font-medium text-gray-900">Account information</div>
-            <div className="mt-1 text-xs text-gray-500">UI-only profile details.</div>
-          </div>
-          <Badge className="shrink-0">Blackpill</Badge>
-        </div>
-
-        <div className="mt-5 divide-y divide-gray-100">
-          <InfoRow label="Name" value={mockProfile.user.name} />
-          <InfoRow label="Email" value={mockProfile.user.email} monospace />
-          <InfoRow label="Username" value={mockProfile.user.username} />
-          <InfoRow label="Referred by" value={mockProfile.user.referredBy} />
-          <InfoRow label="Member for" value={mockProfile.user.memberForLabel} />
+      <Card className="p-4 sm:p-6">
+        <h2 className="text-lg font-medium">Account Information</h2>
+        <div className="mt-6 space-y-4">
+          {[
+            { label: "Name", value: mockProfile.user.name },
+            { label: "Email", value: mockProfile.user.email, breakAll: true, monospace: true },
+            { label: "Username", value: mockProfile.user.username },
+            { label: "Referred By", value: mockProfile.user.referredBy },
+            { label: "Member For", value: mockProfile.user.memberForLabel },
+          ].map((row, idx, arr) => (
+            <div
+              key={row.label}
+              className={cn(
+                "flex flex-col sm:flex-row sm:justify-between py-3 gap-1 sm:gap-0",
+                idx < arr.length - 1 ? "border-b border-gray-100" : undefined,
+              )}
+            >
+              <span className="text-sm text-gray-600">{row.label}</span>
+              <span
+                className={cn(
+                  "text-sm font-medium",
+                  row.breakAll ? "break-all" : undefined,
+                  row.monospace ? "font-mono" : undefined,
+                )}
+              >
+                {row.value}
+              </span>
+            </div>
+          ))}
         </div>
       </Card>
 
-      <Card className="rounded-xl border-gray-200/60 p-4 sm:p-6">
+      <Card className="p-6">
+        <h2 className="text-lg font-medium mb-4">Data Export</h2>
         <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <div className="text-sm font-medium text-gray-900">Security</div>
-            <div className="mt-1 text-xs text-gray-500">Actions are placeholders.</div>
+          <div className="flex-1">
+            <p className="text-sm text-gray-600">
+              Download your local UI history (snapshots + exports) as JSON. This is a UI-only placeholder for now.
+            </p>
           </div>
-        </div>
-
-        <div className="mt-5 flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
-          <div className="text-sm text-gray-700">Password</div>
-          <Button variant="outline" size="sm" disabled>
-            Change password
+          <Button
+            className="flex-shrink-0"
+            leftIcon={
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="lucide lucide-download w-4 h-4"
+                aria-hidden="true"
+              >
+                <path d="M12 15V3"></path>
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <path d="m7 10 5 5 5-5"></path>
+              </svg>
+            }
+            disabled
+          >
+            Download Data
           </Button>
         </div>
       </Card>
@@ -197,7 +231,7 @@ function UsageTab({
         <KpiCard label="Last active" value={lastActiveLabel} hint="From history" />
       </section>
 
-      <Card className="rounded-xl border-gray-200/60 overflow-hidden">
+      <Card className="rounded-xl border-gray-200/50 overflow-hidden">
         <div className="px-4 sm:px-6 py-4 border-b border-gray-100 flex items-start justify-between gap-4">
           <div className="min-w-0">
             <div className="text-sm font-medium text-gray-900">Usage details</div>
@@ -224,7 +258,7 @@ function UsageTab({
 function PlanTab({ cohortLabel }: { cohortLabel: string }) {
   return (
     <div className="space-y-6">
-      <Card className="rounded-xl border-gray-200/60 p-4 sm:p-6">
+      <Card className="rounded-xl border-gray-200/50 p-4 sm:p-6">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <div className="text-sm font-medium text-gray-900">Subscription</div>
@@ -256,7 +290,7 @@ function PlanTab({ cohortLabel }: { cohortLabel: string }) {
         </div>
       </Card>
 
-      <Card className="rounded-xl border-gray-200/60 p-4 sm:p-6">
+      <Card className="rounded-xl border-gray-200/50 p-4 sm:p-6">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <div className="text-sm font-medium text-gray-900">Included features</div>
@@ -280,28 +314,9 @@ function PlanTab({ cohortLabel }: { cohortLabel: string }) {
   );
 }
 
-function InfoRow({
-  label,
-  value,
-  monospace,
-}: {
-  label: string;
-  value: string;
-  monospace?: boolean;
-}) {
-  return (
-    <div className="py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-4">
-      <span className="text-sm text-gray-600">{label}</span>
-      <span className={cn("text-sm font-medium text-gray-900 break-all", monospace ? "font-mono" : undefined)}>
-        {value}
-      </span>
-    </div>
-  );
-}
-
 function KpiCard({ label, value, hint }: { label: string; value: string; hint: string }) {
   return (
-    <Card className="rounded-xl border-gray-200/60 p-4 flex-1">
+    <Card className="rounded-xl border-gray-200/50 p-4 flex-1">
       <div className="min-w-0">
         <div className="text-xs font-medium text-gray-500 uppercase tracking-wider">{label}</div>
         <div className="mt-2 text-2xl font-semibold tracking-tight text-gray-900">{value}</div>

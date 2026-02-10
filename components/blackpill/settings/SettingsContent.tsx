@@ -57,7 +57,7 @@ export function SettingsContent() {
                     type="button"
                     className={cn(
                       "block w-full text-left px-4 py-2 text-sm font-medium rounded-lg transition-colors",
-                      isActive ? "bg-gray-900 text-white" : "text-gray-600 hover:bg-gray-100",
+                      isActive ? "bg-black text-white" : "text-gray-600 hover:bg-gray-100",
                     )}
                     onClick={() => setActive(s.id)}
                     aria-current={isActive ? "page" : undefined}
@@ -116,8 +116,8 @@ function SectionNavMobile({
               key={s.id}
               type="button"
               className={cn(
-                "px-4 py-2 text-sm font-medium rounded-lg transition-colors whitespace-nowrap border",
-                isActive ? "bg-gray-900 text-white border-gray-900" : "text-gray-600 hover:bg-gray-100 border-gray-200",
+                "px-4 py-2 text-sm font-medium rounded-lg transition-colors whitespace-nowrap",
+                isActive ? "bg-black text-white" : "text-gray-600 hover:bg-gray-100 border border-gray-200",
               )}
               onClick={() => onChange(s.id)}
               aria-pressed={isActive}
@@ -147,7 +147,7 @@ function SectionPanel({
         {section.description ? <p className="mt-1 text-sm text-gray-600">{section.description}</p> : null}
       </div>
 
-      <Card className="rounded-xl border-gray-200/60 overflow-hidden">
+      <Card className="rounded-xl border-gray-200/50 overflow-hidden">
         <div className="divide-y divide-gray-100">
           {section.items.map((item) => (
             <div key={item.id} className="px-4 sm:px-6 py-4">

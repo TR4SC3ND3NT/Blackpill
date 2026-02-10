@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/blackpill/Badge";
 import { Card } from "@/components/blackpill/Card";
+import { LineAreaChart } from "@/components/blackpill/charts/LineAreaChart";
 import type { AnalysisSnapshot } from "@/lib/analysisHistory";
 import { formatAgoShort, loadSnapshots, subscribeSnapshots } from "@/lib/analysisHistory";
 import { cn } from "@/lib/cn";
@@ -121,7 +122,7 @@ export function DashboardContent({ selectedId }: DashboardContentProps) {
   if (!snapshots.length) {
     return (
       <div className="max-w-7xl mx-auto px-6 py-[var(--bp-content-py)] sm:py-[var(--bp-content-py-sm)]">
-        <Card className="rounded-xl border-gray-200/60 p-6">
+        <Card className="rounded-xl border-gray-200/50 p-6">
           <div className="text-sm font-medium text-gray-900">No analyses yet</div>
           <div className="mt-1 text-sm text-gray-600">
             Run an analysis to populate your dashboard history.
@@ -174,7 +175,7 @@ export function DashboardContent({ selectedId }: DashboardContentProps) {
 
         <section className="flex flex-col lg:flex-row gap-4 lg:gap-8">
           <div className="flex-1 min-w-0 space-y-4">
-            <Card className="rounded-xl border-gray-200/60 p-4 sm:p-6">
+            <Card className="rounded-xl border-gray-200/50 p-4 sm:p-6">
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
@@ -238,41 +239,26 @@ export function DashboardContent({ selectedId }: DashboardContentProps) {
               </div>
             </Card>
 
-            <Card className="rounded-xl border-gray-200/60 overflow-hidden">
+            <Card className="rounded-xl border-gray-200/50 overflow-hidden">
               <div className="px-4 sm:px-6 py-4 border-b border-gray-100 flex items-start justify-between gap-4">
                 <div className="min-w-0">
                   <div className="text-sm font-medium text-gray-900">Overall Trend</div>
                   <div className="mt-1 text-xs text-gray-500">
-                    Placeholder chart derived from saved snapshots.
+                    Trend derived from saved snapshots.
                   </div>
                 </div>
                 <Badge className="shrink-0">Last 30 days</Badge>
               </div>
 
               <div className="px-4 sm:px-6 py-6">
-                <div className="rounded-xl border border-gray-200/60 bg-gradient-to-b from-gray-50 to-white overflow-hidden">
-                  <div
-                    className="h-48 relative"
-                    style={{
-                      backgroundImage:
-                        "linear-gradient(to right, rgba(17, 24, 39, 0.04) 1px, transparent 1px), linear-gradient(to bottom, rgba(17, 24, 39, 0.04) 1px, transparent 1px)",
-                      backgroundSize: "48px 48px",
-                    }}
-                  >
-                    <div className="absolute inset-0 flex items-end px-4 pb-4">
-                      <div className="flex items-end gap-2 w-full">
-                        {series.overall.slice(-12).map((p) => (
-                          <div key={p.t} className="flex-1 min-w-0">
-                            <div
-                              className="w-full rounded-md bg-gray-900/10"
-                              style={{ height: `${Math.max(8, Math.round((p.overall / 100) * 120))}px` }}
-                            />
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="px-4 py-3 flex items-center justify-between">
+                <div className="space-y-3">
+                  <LineAreaChart
+                    points={series.overall.map((p) => ({ t: p.t, value: p.overall }))}
+                    height={192}
+                    showAxes={false}
+                    valueLabel="Overall"
+                  />
+                  <div className="flex items-center justify-between">
                     <div className="text-xs text-gray-500">Points: {series.overall.length}</div>
                     <div className="text-xs text-gray-500">Local history</div>
                   </div>
@@ -280,7 +266,7 @@ export function DashboardContent({ selectedId }: DashboardContentProps) {
               </div>
             </Card>
 
-            <Card className="rounded-xl border-gray-200/60 overflow-hidden">
+            <Card className="rounded-xl border-gray-200/50 overflow-hidden">
               <div className="px-4 sm:px-6 py-4 border-b border-gray-100 flex items-start justify-between gap-4">
                 <div className="min-w-0">
                   <div className="text-sm font-medium text-gray-900">Recent Analyses</div>
@@ -335,7 +321,7 @@ export function DashboardContent({ selectedId }: DashboardContentProps) {
           </div>
 
           <aside className="w-full lg:w-[360px] flex-shrink-0 space-y-4">
-            <Card className="rounded-xl border-gray-200/60 p-4 sm:p-6">
+            <Card className="rounded-xl border-gray-200/50 p-4 sm:p-6">
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
                   <div className="text-sm font-medium text-gray-900">Overview</div>
@@ -351,7 +337,7 @@ export function DashboardContent({ selectedId }: DashboardContentProps) {
               </div>
             </Card>
 
-            <Card className="rounded-xl border-gray-200/60 p-4 sm:p-6">
+            <Card className="rounded-xl border-gray-200/50 p-4 sm:p-6">
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
                   <div className="text-sm font-medium text-gray-900">Selected Analysis</div>
@@ -400,7 +386,7 @@ export function DashboardContent({ selectedId }: DashboardContentProps) {
                 </div>
               ) : (
                 <div className="mt-5">
-                  <div className="rounded-xl border border-gray-200/60 bg-gradient-to-b from-gray-50 to-white p-4">
+                  <div className="rounded-xl border border-gray-200/50 bg-gradient-to-b from-gray-50 to-white p-4">
                     <div className="animate-pulse space-y-3">
                       <div className="h-3 w-2/3 rounded bg-gray-900/10" />
                       <div className="h-3 w-1/2 rounded bg-gray-900/10" />
@@ -430,7 +416,7 @@ function KpiCard({
   badge?: string;
 }) {
   return (
-    <Card className="rounded-xl border-gray-200/60 p-4 flex-1">
+    <Card className="rounded-xl border-gray-200/50 p-4 flex-1">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="text-xs font-medium text-gray-500 uppercase tracking-wider">{label}</div>

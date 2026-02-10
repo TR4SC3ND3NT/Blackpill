@@ -250,7 +250,7 @@ export function ReportsScreen() {
     >
       <div className="max-w-7xl mx-auto px-6 py-[var(--bp-content-py)] sm:py-[var(--bp-content-py-sm)]">
         <div className="space-y-6">
-          <Card className="rounded-xl border-gray-200/60 p-4 sm:p-6">
+          <Card className="rounded-xl border-gray-200/50 p-4 sm:p-6">
             <div className="flex flex-col lg:flex-row gap-3 lg:items-center lg:justify-between">
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-medium text-gray-900">Filters</div>
@@ -298,7 +298,7 @@ export function ReportsScreen() {
             </div>
           </Card>
 
-          <Card className="rounded-xl border-gray-200/60 overflow-hidden">
+          <Card className="rounded-xl border-gray-200/50 overflow-hidden">
             <div className="px-4 sm:px-6 py-4 border-b border-gray-100 flex items-start justify-between gap-4">
               <div className="min-w-0">
                 <div className="text-sm font-medium text-gray-900">Report history</div>
@@ -417,7 +417,7 @@ export function ReportsScreen() {
             </div>
           </Card>
 
-          <Card className="rounded-xl border-gray-200/60 p-4 sm:p-6">
+          <Card className="rounded-xl border-gray-200/50 p-4 sm:p-6">
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0">
                 <div className="text-sm font-medium text-gray-900">Export notes</div>

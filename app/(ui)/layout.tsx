@@ -1,6 +1,13 @@
 import type { Metadata } from "next";
 import "./ui.css";
 import { UiSettingsApplier } from "@/components/blackpill/shell/UiSettingsApplier";
+import { Manrope } from "next/font/google";
+
+const manrope = Manrope({
+  subsets: ["latin"],
+  variable: "--font-manrope",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: {
@@ -20,7 +27,7 @@ export default function UiLayout({
   // element itself. We keep `.bp` as the scope root and render the actual UI
   // inside a child that can use utilities.
   return (
-    <div className="bp">
+    <div className={`bp ${manrope.variable}`}>
       <div className="fixed inset-0 overflow-y-auto bg-neutral-50 text-gray-900 antialiased">
         <UiSettingsApplier />
         {children}
