@@ -1,6 +1,13 @@
+/* Tailwind v4: theme variables live in a separate layer. Import them explicitly. */
+@import "tailwindcss/theme" layer(theme);
+
 @tailwind base;
 @tailwind components;
-@tailwind utilities;
+
+/* Scope Tailwind utilities to the UI layer to avoid collisions with the main app. */
+.bp {
+  @tailwind utilities;
+}
 
 /* Scoped tokens + minimal "base" defaults for Tailwind CSS variables (preflight is disabled). */
 .bp {
