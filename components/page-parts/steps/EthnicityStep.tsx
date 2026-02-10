@@ -27,7 +27,7 @@ export default function EthnicityStep({
           Choose the closest match to align feature comparisons.
         </div>
       </div>
-      <div className={styles.choiceGrid}>
+      <div className={`${styles.choiceGrid} ${styles.choiceGridVertical}`}>
         {[
           { value: "asian", label: "Asian" },
           { value: "black", label: "Black / African" },
