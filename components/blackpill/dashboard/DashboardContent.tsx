@@ -282,10 +282,6 @@ export function DashboardContent({ selectedId }: DashboardContentProps) {
                     showAxes={false}
                     valueLabel="Overall"
                   />
-                  <div className="flex items-center justify-between">
-                    <div className="text-xs text-gray-500">Points: {series.overall.length}</div>
-                    <div className="text-xs text-gray-500">Local history</div>
-                  </div>
                 </div>
               </div>
             </Card>

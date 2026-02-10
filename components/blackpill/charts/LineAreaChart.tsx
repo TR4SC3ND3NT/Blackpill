@@ -14,6 +14,7 @@ export type LineAreaChartProps = {
   domain?: [number, number];
   className?: string;
   gridSize?: number;
+  curve?: "linear" | "smooth";
   showAxes?: boolean;
   showTooltip?: boolean;
   valueLabel?: string;
@@ -35,6 +36,7 @@ export function LineAreaChart({
   domain = [0, 100],
   className,
   gridSize = 48,
+  curve = "smooth",
   showAxes = true,
   showTooltip = true,
   valueLabel = "Overall",
@@ -71,15 +73,43 @@ export function LineAreaChart({
       ys[i] = toY(points[i]?.value ?? minV);
     }
 
-    const lineD =
-      n === 1
-        ? `M ${pad} ${ys[0]} L ${pad + innerW} ${ys[0]}`
-        : xs.map((x, i) => `${i === 0 ? "M" : "L"} ${x} ${ys[i]}`).join(" ");
+    const mkSmoothD = () => {
+      if (n === 1) return `M ${pad} ${ys[0]} L ${pad + innerW} ${ys[0]}`;
+      const parts: string[] = [];
+      parts.push(`M ${xs[0]} ${ys[0]}`);
+
+      // Catmull-Rom -> Bezier (uniform) for a smooth curve.
+      for (let i = 0; i < n - 1; i += 1) {
+        const x0 = xs[i - 1] ?? xs[i];
+        const y0 = ys[i - 1] ?? ys[i];
+        const x1 = xs[i];
+        const y1 = ys[i];
+        const x2 = xs[i + 1] ?? xs[i];
+        const y2 = ys[i + 1] ?? ys[i];
+        const x3 = xs[i + 2] ?? x2;
+        const y3 = ys[i + 2] ?? y2;
+
+        const c1x = x1 + (x2 - x0) / 6;
+        const c1y = y1 + (y2 - y0) / 6;
+        const c2x = x2 - (x3 - x1) / 6;
+        const c2y = y2 - (y3 - y1) / 6;
+
+        parts.push(`C ${c1x} ${c1y} ${c2x} ${c2y} ${x2} ${y2}`);
+      }
+      return parts.join(" ");
+    };
+
+    const mkLinearD = () => {
+      if (n === 1) return `M ${pad} ${ys[0]} L ${pad + innerW} ${ys[0]}`;
+      return xs.map((x, i) => `${i === 0 ? "M" : "L"} ${x} ${ys[i]}`).join(" ");
+    };
+
+    const lineD = curve === "linear" ? mkLinearD() : mkSmoothD();
 
     const areaD = `${lineD} L ${pad + innerW} ${pad + innerH} L ${pad} ${pad + innerH} Z`;
 
     return { w, h, pad, innerW, innerH, xs, ys, lineD, areaD, count: n };
-  }, [domain, points]);
+  }, [curve, domain, points]);
 
   const onMove: React.MouseEventHandler<HTMLDivElement> = (event) => {
     if (!showTooltip) return;
