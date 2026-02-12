@@ -1,4 +1,3 @@
-# FaceIQ Clone - 98% beta.faceiqlabs.com
 
 ✅ 60+ ratios vs 32 ethnicity/gender cohorts  
 ✅ #F6F7FB glassmorphism + sidebar history  
